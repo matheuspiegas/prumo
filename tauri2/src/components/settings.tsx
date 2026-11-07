@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { centerOf, useThemeTransition } from "@/hooks/use-theme-transition";
-import { AlertCircle, CheckCircle2, FlaskConical, FolderOpen, Loader2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, FlaskConical, Copy, FolderOpen, Loader2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -66,11 +66,16 @@ export function SettingsView() {
   const [saved, setSaved] = useState<Settings | null>(null);
   const [form, setForm] = useState<Settings | null>(null);
   const [discovery, setDiscovery] = useState<Discovery | null>(null);
+  const [mcpCmd, setMcpCmd] = useState("");
   const [claude, setClaude] = useState<ClaudeStatus | null>(null);
   const [testing, setTesting] = useState(false);
   const [test, setTest] = useState<{ ok: true; r: ClaudeTest } | { ok: false; e: string } | null>(null);
   const [capturing, setCapturing] = useState(false);
   const [capturingQuick, setCapturingQuick] = useState(false);
+
+  useEffect(() => {
+    api.mcpCommand().then(setMcpCmd).catch(() => {});
+  }, []);
 
   const detect = useCallback((path: string | null) => api.detectClaude(path).then(setClaude).catch(() => {}), []);
 
@@ -243,6 +248,25 @@ export function SettingsView() {
               </div>
               <Switch id="reminders" checked={form.reminders} onCheckedChange={(c) => patch({ reminders: c })} />
             </div>
+          </Section>
+
+          <Section
+            title="Agentes (MCP e CLI)"
+            hint="Deixe o Claude Code ou o Codex criarem tarefas. Tudo que eles criam cai na caixa de entrada para você aprovar."
+          >
+            <Field label="Registrar no Claude Code" hint="Rode este comando uma vez no terminal. Se mover o app de pasta, rode de novo.">
+              <div className="flex items-center gap-2">
+                <code className="min-w-0 flex-1 truncate rounded-md border bg-muted px-3 py-2 text-xs">{mcpCmd}</code>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  disabled={!mcpCmd}
+                  onClick={() => navigator.clipboard.writeText(mcpCmd).then(() => toast.success("Comando copiado"))}
+                >
+                  <Copy className="size-4" />
+                </Button>
+              </div>
+            </Field>
           </Section>
 
           <Section title="Claude" hint="Interpreta o que você disse (título e data) usando a CLI do Claude Code, com a sua assinatura.">

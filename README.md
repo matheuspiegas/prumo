@@ -16,6 +16,7 @@
 - Tema claro e escuro.
 - Dados locais em SQLite, sem conta e sem nuvem.
 - **Criação de tarefas por voz:** você fala, a transcrição roda localmente e o Claude Code (via `claude -p`) extrai o título e a data. A tarefa entra numa caixa de entrada para você conferir.
+- **CLI e servidor MCP:** o binário `prumo-cli` (crate `cli/`) permite criar e consultar tarefas pelo terminal ou por agentes como Claude Code e Codex. Tarefas criadas assim caem na caixa de entrada para você aprovar, e não há comando de exclusão. O app se atualiza sozinho quando outro processo grava no banco.
 
 ## Stack
 
@@ -27,6 +28,7 @@
 
 ```
 core/       banco de dados e regras (Rust)
+cli/        binário `prumo-cli`: CLI e servidor MCP
 tauri2/     aplicativo (Tauri + React)
 branding/   logo e opções de ícone
 ```
@@ -43,10 +45,27 @@ npm run tauri dev
 
 Testes do `core`: `cd core && cargo test`.
 
+## CLI e MCP
+
+```sh
+cd cli && cargo build --release   # ou: npm run prepare-cli, em tauri2/
+prumo-cli add "revisar PR" --due amanhã --tag trabalho
+prumo-cli list --inbox          # também: --today, --tomorrow, --all, --done, --overdue
+prumo-cli done 12
+prumo-cli search dentista
+```
+
+Para o Claude Code usar o Prumo como servidor MCP (o app mostra o comando pronto em Configurações → Agentes):
+
+```sh
+claude mcp add prumo -- /caminho/para/prumo-cli mcp
+```
+
+Tools: `add_task`, `list_tasks`, `complete_task`, `search_tasks`, `update_task`, `add_subtask`, `list_tags`. Defina `PRUMO_DATA_DIR` para usar outro banco.
+
 ## Observações
 
 - O `transcribe-rs` 0.3.12 não compila com `ort` mais novo que `2.0.0-rc.12`; a versão está fixada no `Cargo.lock`.
-- A integração por servidor MCP / CLI (para Claude Code e Codex criarem tarefas) ainda não existe.
 
 ## Licença
 

@@ -1,4 +1,4 @@
-import { Check, Repeat, Sparkles, Trash2, X } from "lucide-react";
+import { Check, Mic, Repeat, Sparkles, Terminal, Trash2, X, type LucideIcon } from "lucide-react";
 import { recurrenceLabel } from "@/components/recurrence-select";
 import { AnimatePresence, motion, Reorder } from "motion/react";
 import { useRef, useState, type Ref } from "react";
@@ -18,6 +18,13 @@ const pop = {
   initial: { opacity: 0, scale: 0.6 },
   animate: { opacity: 1, scale: 1, transition: bouncy },
   exit: { opacity: 0, scale: 0.6, transition: { duration: 0.12 } },
+};
+
+/** Rótulo/ícone da origem; "mcp" e "cli" vêm de agentes externos. */
+const SOURCES: Record<string, { label: string; icon: LucideIcon }> = {
+  voz: { label: "Voz", icon: Mic },
+  cli: { label: "CLI", icon: Terminal },
+  mcp: { label: "MCP", icon: Sparkles },
 };
 
 export function TaskRow({
@@ -127,9 +134,12 @@ export function TaskRow({
         )}
         {task.source !== "manual" && (
           <motion.span key="src" className="flex" {...pop}>
-            <Badge variant="secondary" className="gap-1 capitalize">
-              <Sparkles className="size-3" />
-              {task.source}
+            <Badge variant="secondary" className="gap-1" title={`Origem: ${SOURCES[task.source]?.label ?? task.source}`}>
+              {(() => {
+                const Icon = SOURCES[task.source]?.icon ?? Sparkles;
+                return <Icon className="size-3" />;
+              })()}
+              <span className={SOURCES[task.source] ? undefined : "capitalize"}>{SOURCES[task.source]?.label ?? task.source}</span>
             </Badge>
           </motion.span>
         )}

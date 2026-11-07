@@ -95,6 +95,28 @@ fn err<E: ToString>(e: E) -> String {
     e.to_string()
 }
 
+/// Comando para registrar o servidor MCP do Prumo no Claude Code.
+#[tauri::command]
+fn mcp_command() -> String {
+    let exe = if cfg!(windows) { "prumo-cli.exe" } else { "prumo-cli" };
+    let mut cands: Vec<PathBuf> = vec![];
+    // Produção (e `tauri dev`): o sidecar fica ao lado do executável do app.
+    if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) {
+        cands.push(dir.join(exe));
+    }
+    // Fallback em desenvolvimento: binário compilado em cli/target.
+    let cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../cli/target");
+    cands.push(cli.join("release").join(exe));
+    cands.push(cli.join("debug").join(exe));
+    let path = cands
+        .into_iter()
+        .find(|p| p.is_file())
+        .and_then(|p| p.canonicalize().ok())
+        .map(|p| p.display().to_string().trim_start_matches(r"\\?\").replace('\\', "/"))
+        .unwrap_or_else(|| "prumo-cli".to_string());
+    format!("claude mcp add prumo -- \"{path}\" mcp")
+}
+
 fn lock<'a>(db: &'a State<AppDb>) -> Result<std::sync::MutexGuard<'a, Db>, String> {
     db.0.lock().map_err(err)
 }
@@ -357,6 +379,32 @@ fn dates() -> (String, String) {
     (today(), tomorrow())
 }
 
+/// Detecta escritas de OUTRO processo (CLI/MCP) no mesmo banco: `PRAGMA data_version`
+/// só muda quando outra conexão faz commit. Usa conexão própria (sem o Mutex do AppDb).
+/// Escritas do próprio app também a alteram (conexão distinta), gerando no máximo
+/// um `tasks-changed` extra por escrita, que é inofensivo.
+fn watch_external_changes(app: AppHandle, path: std::path::PathBuf) {
+    std::thread::spawn(move || {
+        let db = match Db::open(&path) {
+            Ok(d) => d,
+            Err(e) => {
+                plog!("watcher: {e}");
+                return;
+            }
+        };
+        let mut last = db.data_version().ok();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            if let Ok(v) = db.data_version() {
+                if last != Some(v) {
+                    last = Some(v);
+                    let _ = app.emit("tasks-changed", ());
+                }
+            }
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     logging::init();
@@ -393,6 +441,7 @@ pub fn run() {
             }
             tray::setup(app.handle())?;
             reminders::start(app.handle());
+            watch_external_changes(app.handle().clone(), dir.join("prumo.db"));
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -458,6 +507,7 @@ pub fn run() {
             voice::voice_stop,
             voice::voice_cancel,
             voice::get_settings,
+            mcp_command,
             voice::save_settings,
             voice::discover_models,
             voice::detect_claude,

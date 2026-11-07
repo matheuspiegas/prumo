@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "prepare-cli": "node scripts/prepare-cli.mjs",
+    "prepare-cli:release": "node scripts/prepare-cli.mjs --release",
     "tauri": "tauri"
   },
   "dependencies": {

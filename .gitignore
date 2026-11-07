@@ -20,3 +20,6 @@ dist/
 # Exploração de logos (fica só local; a logo oficial é branding/app-icon.svg)
 branding/logos/
 branding/gallery.html
+
+# Sidecar gerado por `npm run prepare-cli`
+tauri2/src-tauri/binaries/

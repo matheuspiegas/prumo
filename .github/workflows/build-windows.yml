@@ -29,7 +29,10 @@ jobs:
       # Compartilha o cache de compilação do Rust entre execuções.
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: tauri2/src-tauri
+          # O cli/ é compilado pelo `beforeBuildCommand` (npm run prepare-cli:release) como sidecar.
+          workspaces: |
+            tauri2/src-tauri
+            cli
           # Muda a chave quando a configuração do ggml muda, para não reaproveitar um build antigo.
           key: ggml-native-off
 

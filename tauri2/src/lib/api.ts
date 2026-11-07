@@ -122,6 +122,7 @@ export const api = {
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
   models: () => invoke<Discovery>("discover_models"),
   detectClaude: (path: string | null) => invoke<ClaudeStatus>("detect_claude", { path }),
+  mcpCommand: () => invoke<string>("mcp_command"),
   testClaude: (settings: Settings) => invoke<ClaudeTest>("test_claude", { settings }),
 };
 

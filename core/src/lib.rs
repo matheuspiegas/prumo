@@ -113,6 +113,12 @@ impl Db {
         Self::init(Connection::open_in_memory()?)
     }
 
+    /// `PRAGMA data_version`: muda quando OUTRA conexão (outro processo ou outra
+    /// `Db`) faz commit. Não muda com escritas da própria conexão.
+    pub fn data_version(&self) -> Result<i64> {
+        self.conn.query_row("PRAGMA data_version", [], |r| r.get(0))
+    }
+
     fn init(conn: Connection) -> Result<Self> {
         // WAL permite que outro processo (ex.: servidor MCP) leia/escreva junto.
         conn.pragma_update(None, "journal_mode", "WAL")?;
@@ -437,6 +443,23 @@ mod tests {
         assert_eq!(db.completed().unwrap()[0].title, "Editada");
         db.delete_task(a).unwrap();
         assert!(db.completed().unwrap().is_empty());
+    }
+
+    #[test]
+    fn data_version_changes_on_external_write_only() {
+        let path = std::env::temp_dir().join(format!("prumo-dv-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let watcher = Db::open(&path).unwrap();
+        let writer = Db::open(&path).unwrap();
+        let v0 = watcher.data_version().unwrap();
+        watcher.add_task_from("própria", "", None, "manual").unwrap();
+        assert_eq!(watcher.data_version().unwrap(), v0);
+        writer.add_task_from("externa", "", None, "cli").unwrap();
+        assert_ne!(watcher.data_version().unwrap(), v0);
+        drop((watcher, writer));
+        for ext in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{ext}", path.display()));
+        }
     }
 
     #[test]
