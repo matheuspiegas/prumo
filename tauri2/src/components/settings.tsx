@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTheme } from "next-themes";
-import { AlertCircle, CheckCircle2, FlaskConical, Loader2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, FlaskConical, FolderOpen, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -285,6 +285,18 @@ export function SettingsView() {
                 </p>
               )}
               {test && !test.ok && <p className="text-sm text-destructive">{test.e}</p>}
+            </div>
+          </Section>
+
+          <Section title="Diagnóstico" hint="O Prumo grava um arquivo de log (prumo.log) com cada etapa da voz. Se o app fechar sozinho, a última linha mostra onde parou.">
+            <div>
+              <Button
+                variant="outline"
+                onClick={() => api.openLogs().catch((e) => toast.error(String(e)))}
+              >
+                <FolderOpen data-icon="inline-start" />
+                Abrir pasta de logs
+              </Button>
             </div>
           </Section>
 

@@ -87,6 +87,7 @@ pub fn start(app: AppHandle) -> Result<Recording, String> {
                 .ok_or("Nenhum microfone encontrado (verifique a permissão de microfone)")?;
             let cfg = device.default_input_config().map_err(|e| format!("Microfone indisponível: {e}"))?;
             let (rate, channels, fmt) = (cfg.sample_rate(), cfg.channels() as usize, cfg.sample_format());
+            crate::plog!("áudio: microfone padrão {rate} Hz, {channels} canal(is), formato {fmt:?}");
             let stream_cfg: cpal::StreamConfig = cfg.into();
             let buf = Arc::new(Mutex::new(Vec::new()));
             let limit = rate as usize * channels * MAX_SECONDS;

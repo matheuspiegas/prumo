@@ -322,7 +322,18 @@ pub fn resolve(configured: Option<&str>) -> Option<PathBuf> {
 /// `samples`: mono, f32, 16 kHz. O modelo é carregado e liberado a cada chamada,
 /// para não manter ~GB de RAM ocupados com o app ocioso.
 pub fn transcribe(model: &Path, samples: &[f32]) -> Result<String, String> {
-    match classify(model) {
+    let engine = classify(model);
+    // Gravado ANTES de carregar o modelo: se o processo morrer num erro nativo (C++/ONNX),
+    // esta é a última linha do log.
+    crate::plog!("stt: carregando modelo {} (motor={:?}, {} amostras)", model.display(), engine, samples.len());
+    let t = std::time::Instant::now();
+    let res = transcribe_with_engine(engine, model, samples);
+    crate::plog!("stt: terminou em {:.2?} ({})", t.elapsed(), if res.is_ok() { "ok" } else { "erro" });
+    res
+}
+
+fn transcribe_with_engine(engine: Option<Engine>, model: &Path, samples: &[f32]) -> Result<String, String> {
+    match engine {
         Some(Engine::ParakeetOnnx) => transcribe_parakeet(model, samples),
         Some(Engine::Ggml) => transcribe_ggml(model, samples),
         None => Err("Modelo inválido: esperado uma pasta Parakeet ONNX ou um arquivo .bin/.gguf".into()),

@@ -1,5 +1,6 @@
 mod audio;
 mod interpret;
+mod logging;
 mod settings;
 mod stt;
 mod voice;
@@ -150,6 +151,16 @@ fn open_attachment(app: AppHandle, path: String) -> Result<(), String> {
     app.opener().open_path(path, None::<&str>).map_err(err)
 }
 
+/// Abre a pasta de logs no explorador de arquivos e devolve o caminho.
+#[tauri::command]
+fn open_logs(app: AppHandle) -> Result<String, String> {
+    let dir = logging::log_dir();
+    std::fs::create_dir_all(&dir).map_err(err)?;
+    let path = dir.to_string_lossy().into_owned();
+    app.opener().open_path(path.clone(), None::<&str>).map_err(err)?;
+    Ok(path)
+}
+
 #[tauri::command]
 fn dates() -> (String, String) {
     (today(), tomorrow())
@@ -157,6 +168,7 @@ fn dates() -> (String, String) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    logging::init();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -193,6 +205,7 @@ pub fn run() {
             delete_attachment,
             open_attachment,
             dates,
+            open_logs,
             voice::voice_start,
             voice::voice_stop,
             voice::voice_cancel,

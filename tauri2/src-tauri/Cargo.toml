@@ -43,5 +43,5 @@ tauri-plugin-global-shortcut = "2.4.1"
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
+panic = "unwind" # permite que um panic na transcrição vire erro (e não feche o app)
 strip = true

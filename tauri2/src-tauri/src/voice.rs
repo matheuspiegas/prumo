@@ -39,7 +39,9 @@ pub fn voice_start(app: AppHandle, voice: State<VoiceState>) -> Result<(), Strin
     if slot.is_some() {
         return Err("Já existe uma gravação em andamento".into());
     }
-    *slot = Some(audio::start(app)?);
+    crate::plog!("voz: iniciando gravação");
+    *slot = Some(audio::start(app).inspect_err(|e| crate::plog!("voz: ERRO ao iniciar gravação: {e}"))?);
+    crate::plog!("voz: gravando");
     Ok(())
 }
 
@@ -52,7 +54,8 @@ pub fn voice_cancel(voice: State<VoiceState>) -> Result<(), String> {
 }
 
 fn process(app: &AppHandle, rec: audio::Recording, s: &Settings) -> Result<Outcome, String> {
-    let samples = rec.finish()?;
+    let samples = rec.finish().inspect_err(|e| crate::plog!("voz: ERRO ao encerrar gravação: {e}"))?;
+    crate::plog!("voz: gravação encerrada: {} amostras ({:.1}s a 16 kHz)", samples.len(), samples.len() as f32 / audio::TARGET_RATE as f32);
     if samples.len() < (audio::TARGET_RATE as usize * 4 / 10) {
         return Err("Gravação muito curta".into());
     }
@@ -65,15 +68,20 @@ fn process(app: &AppHandle, rec: audio::Recording, s: &Settings) -> Result<Outco
     })?;
 
     let _ = app.emit("voice-status", "transcribing");
-    let transcript = stt::transcribe(&model, &samples)?;
+    let transcript = stt::transcribe(&model, &samples).inspect_err(|e| crate::plog!("voz: ERRO na transcrição: {e}"))?;
+    crate::plog!("voz: transcrição ok ({} caracteres)", transcript.chars().count());
     if transcript.is_empty() {
         return Err("Não consegui ouvir nada na gravação".into());
     }
 
     let _ = app.emit("voice-status", "interpreting");
     match interpret::interpret(s, &transcript) {
-        Ok(parsed) => Ok(Outcome { transcript, parsed, warning: None }),
+        Ok(parsed) => {
+            crate::plog!("voz: interpretação ok (data={:?})", parsed.date);
+            Ok(Outcome { transcript, parsed, warning: None })
+        }
         Err(e) => {
+            crate::plog!("voz: interpretação falhou, usando texto bruto: {e}");
             // Nunca perder a gravação: usa o texto bruto como título.
             let title: String = transcript.chars().take(80).collect();
             let notes = if transcript.chars().count() > 80 { transcript.clone() } else { String::new() };
@@ -93,7 +101,11 @@ pub async fn voice_stop(
     let app2 = app.clone();
     let out = tauri::async_runtime::spawn_blocking(move || process(&app2, rec, &settings))
         .await
-        .map_err(err)??;
+        .map_err(|e| {
+            crate::plog!("voz: a tarefa de transcrição terminou de forma inesperada: {e}");
+            format!("A transcrição falhou de forma inesperada ({e}). Veja o log em Configurações > Diagnóstico.")
+        })??;
+    crate::plog!("voz: tarefa criada");
 
     let s = settings::load();
     let db = db.0.lock().map_err(err)?;
