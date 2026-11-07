@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5B7BFF"/><stop offset="1" stop-color="#2F3FC4"/></linearGradient>
+  </defs>
+  <g transform="translate(100 100)">
+    <rect width="824" height="824" rx="185" fill="url(#bg)"/>
+    <path d="M232 105 H548 L662 219 V652 A60 60 0 0 1 602 712 H232 A60 60 0 0 1 172 652 V165 A60 60 0 0 1 232 105 Z" fill="#FFFFFF"/>
+    <path d="M548 105 V219 H662 Z" fill="#CBD4FF"/>
+    <circle cx="272" cy="360" r="38" fill="#2F3FC4"/>
+    <polyline points="254,361 267,375 292,345" fill="none" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="272" cy="480" r="34" fill="none" stroke="#9AA8F2" stroke-width="12"/>
+    <circle cx="272" cy="600" r="34" fill="none" stroke="#9AA8F2" stroke-width="12"/>
+    <g stroke-linecap="round" stroke-width="26">
+      <line x1="352" y1="360" x2="570" y2="360" stroke="#2F3FC4"/>
+      <line x1="352" y1="480" x2="540" y2="480" stroke="#C5CCF5"/>
+      <line x1="352" y1="600" x2="500" y2="600" stroke="#C5CCF5"/>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2E2A7A"/><stop offset=".55" stop-color="#8A3BA0"/><stop offset="1" stop-color="#F2705B"/></linearGradient>
+    <radialGradient id="sun" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#FFD66B"/><stop offset="1" stop-color="#FFB347"/></radialGradient>
+  </defs>
+  <g transform="translate(100 100)">
+    <rect width="824" height="824" rx="185" fill="url(#bg)"/>
+    <circle cx="545" cy="285" r="150" fill="url(#sun)"/>
+    <polyline points="190,445 330,585 625,235" fill="none" stroke="#FFF8E7" stroke-width="78" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

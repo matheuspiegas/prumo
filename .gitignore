@@ -1,0 +1,18 @@
+# macOS / editores
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Rust
+target/
+
+# Node
+node_modules/
+dist/
+*.log
+
+# Dados locais (banco, anexos, configurações) nunca devem ir para o repositório
+*.db
+*.db-shm
+*.db-wal
