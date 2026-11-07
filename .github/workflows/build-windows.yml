@@ -1,0 +1,43 @@
+name: Build Windows
+
+# Só roda quando você dispara manualmente (aba Actions > Build Windows > Run workflow).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tauri2/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Compartilha o cache de compilação do Rust entre execuções.
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: tauri2/src-tauri
+
+      - name: Instalar dependências do frontend
+        working-directory: tauri2
+        run: npm ci
+
+      # Gera os instaladores (NSIS .exe e MSI) e os anexa à execução como artefatos.
+      # Sem tagName/releaseId a action não cria release nenhuma.
+      - uses: tauri-apps/tauri-action@v1
+        with:
+          projectPath: tauri2
+          uploadWorkflowArtifacts: true
