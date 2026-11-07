@@ -45,6 +45,24 @@ export default function App() {
   const [counts, setCounts] = useState<Counts>({ today: 0, tomorrow: 0, inbox: 0 });
   const [overdue, setOverdue] = useState<Task[]>([]);
   const [dates, setDates] = useState<[string, string]>(["", ""]);
+  // Sidebar recolhível: lembra a escolha; sem escolha prévia, começa recolhida em janelas estreitas.
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    try {
+      const v = localStorage.getItem("prumo.sidebar");
+      if (v) return v === "open";
+    } catch {
+      /* sem armazenamento: usa o padrão */
+    }
+    return window.innerWidth >= 860;
+  });
+  const changeSidebarOpen = (open: boolean) => {
+    setSidebarOpen(open);
+    try {
+      localStorage.setItem("prumo.sidebar", open ? "open" : "closed");
+    } catch {
+      /* ignora */
+    }
+  };
   const [quick, setQuick] = useState("");
   const [dialog, setDialog] = useState<DialogState>({ open: false, task: null });
   // Filtro por tag (independente de Filter); quando definido, filter fica em 2.
@@ -379,7 +397,7 @@ export default function App() {
   if (subtitle) lastSubtitle.current = subtitle;
 
   return (
-    <SidebarProvider className="h-screen">
+    <SidebarProvider className="h-screen" open={sidebarOpen} onOpenChange={changeSidebarOpen}>
       <AppSidebar
         filter={filter}
         tags={tagList}

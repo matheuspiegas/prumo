@@ -161,10 +161,9 @@ export function QuickAdd() {
     setError(null);
     try {
       await api.quickAdd(t, date, time);
-      // Sem aprovação automática a tarefa vai para a caixa de entrada (igual ao Rust).
-      const auto = await api.getSettings().then((s) => s.autoApprove).catch(() => false);
+      // Tarefa digitada vai direto para as tarefas (o Rust aprova sempre).
       setTitle("");
-      showDone({ title: t, date, inbox: !auto, warning: null });
+      showDone({ title: t, date, inbox: false, warning: null });
     } catch (e) {
       setError(String(e));
     } finally {

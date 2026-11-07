@@ -1,8 +1,8 @@
 import { AnimatePresence, motion } from "motion/react";
 import { DUR_BASE, DUR_FAST, easeOut, spring } from "@/lib/motion";
 import { AnimatedCount } from "@/components/animated-count";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { CalendarDays, CalendarRange, CheckCheck, Hash, Inbox, ListTodo, Settings as SettingsIcon, Trash2, Sunrise, Sun } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { CalendarDays, CalendarRange, CheckCheck, Hash, Inbox, ListTodo, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Settings as SettingsIcon, Trash2, Sunrise, Sun } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -15,8 +15,10 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { Button } from "@/components/ui/button";
+import { centerOf, useThemeTransition } from "@/hooks/use-theme-transition";
 import type { Counts, Filter, TagCount } from "@/lib/api";
 
 const ITEMS: { filter: Filter; label: string; icon: typeof Sun }[] = [
@@ -41,15 +43,31 @@ const collapseVariants = {
 };
 
 /** Botão da sidebar. O fundo do item ativo é desenhado pela <ActivePill/> (uma só, que se move). */
-function NavButton({ active, onClick, children, className }: { active: boolean; onClick?: () => void; children: ReactNode; className?: string }) {
+function NavButton({
+  active,
+  onClick,
+  children,
+  className,
+  collapsed = false,
+  tooltip,
+}: {
+  active: boolean;
+  onClick?: (e: MouseEvent<HTMLElement>) => void;
+  children: ReactNode;
+  className?: string;
+  /** Recolhida: só o ícone (o rótulo some e o tooltip mostra o nome). */
+  collapsed?: boolean;
+  tooltip?: string;
+}) {
   return (
     <SidebarMenuButton
       isActive={active}
       data-nav-active={active ? "true" : undefined}
       onClick={onClick}
+      tooltip={tooltip}
       // Sem fundo próprio quando ativo (a pílula cuida disso) e hover mais discreto nos demais:
       // assim o item de destino não fica cinza antes de a pílula chegar.
-      className={`relative data-active:bg-transparent hover:bg-sidebar-accent/50 data-active:hover:bg-transparent [&_svg]:transition-transform [&_svg]:duration-150 hover:[&_svg]:scale-110 hover:[&_svg]:-rotate-6 ${className ?? ""}`}
+      className={`relative ${collapsed ? "justify-center [&>span]:hidden" : ""} data-active:bg-transparent hover:bg-sidebar-accent/50 data-active:hover:bg-transparent [&_svg]:transition-transform [&_svg]:duration-150 hover:[&_svg]:scale-110 hover:[&_svg]:-rotate-6 ${className ?? ""}`}
       render={<motion.button whileTap={{ scale: 0.97 }} transition={{ duration: 0.1 }} />}
     >
       {children}
@@ -126,6 +144,26 @@ function ActivePill({ wrapRef, activeKey, layoutKey }: { wrapRef: RefObject<HTML
   );
 }
 
+const THEME_ORDER = ["system", "light", "dark"] as const;
+const THEME_LABEL = { system: "Tema: sistema", light: "Tema: claro", dark: "Tema: escuro" };
+const THEME_ICON = { system: Monitor, light: Sun, dark: Moon };
+
+/** Linha do rodapé que alterna o tema (sistema, claro, escuro), com a revelação circular. */
+function ThemeItem({ collapsed }: { collapsed: boolean }) {
+  const { theme, change } = useThemeTransition();
+  const current = (THEME_ORDER as readonly string[]).includes(theme) ? (theme as (typeof THEME_ORDER)[number]) : "system";
+  const next = THEME_ORDER[(THEME_ORDER.indexOf(current) + 1) % THEME_ORDER.length];
+  const Icon = THEME_ICON[current];
+  return (
+    <SidebarMenuItem>
+      <NavButton active={false} collapsed={collapsed} tooltip={THEME_LABEL[current]} onClick={(e) => change(next, centerOf(e.currentTarget))}>
+        <Icon />
+        <span>{THEME_LABEL[current]}</span>
+      </NavButton>
+    </SidebarMenuItem>
+  );
+}
+
 export function AppSidebar({
   filter,
   onFilter,
@@ -159,15 +197,41 @@ export function AppSidebar({
   const targetOf = (f: Filter) => (f === 0 ? "today" : f === 1 ? "tomorrow" : f === 2 ? "all" : null);
   const badge = (f: Filter) => (f === 0 ? counts.today : f === 1 ? counts.tomorrow : 0);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const { state, setOpen } = useSidebar();
+  const collapsed = state === "collapsed";
+  /** Expandida: contador; recolhida: só um pontinho (o número vai no tooltip). */
+  const badgeOf = (n: number, node: ReactNode) =>
+    n <= 0 ? null : collapsed ? (
+      <span aria-hidden className="pointer-events-none absolute top-1 right-1.5 size-2 rounded-full bg-primary" />
+    ) : (
+      <SidebarMenuBadge>{node}</SidebarMenuBadge>
+    );
+  const withCount = (label: string, n: number) => (n > 0 ? `${label} · ${n}` : label);
   const activeKey = settingsActive ? "settings" : trashActive ? "trash" : weekActive ? "week" : activeTag ? `tag:${activeTag.toLowerCase()}` : `f${filter}`;
   return (
-    <Sidebar collapsible="none" className="border-r">
+    <Sidebar
+      collapsible="none"
+      className="border-r transition-[width] duration-200 ease-out"
+      style={{ "--sidebar-width": collapsed ? "3.5rem" : "16rem" } as CSSProperties}
+    >
       <div ref={wrapRef} className="relative flex min-h-0 flex-1 flex-col">
-      <ActivePill wrapRef={wrapRef} activeKey={activeKey} layoutKey={tags.map((t) => t.name).join("|")} />
-        <SidebarHeader className="px-4 pt-5 pb-2">
-          <div className="flex items-center gap-2">
-            <CalendarDays className="size-5" />
-            <span className="text-lg font-semibold tracking-tight">Prumo</span>
+      <ActivePill wrapRef={wrapRef} activeKey={activeKey} layoutKey={`${collapsed ? "c" : "e"}:${tags.map((t) => t.name).join("|")}`} />
+        <SidebarHeader className={collapsed ? "items-center gap-2 px-2 pt-4 pb-2" : "px-4 pt-5 pb-2"}>
+          <div className={collapsed ? "flex flex-col items-center gap-2" : "flex items-center justify-between gap-2"}>
+            <div className="flex items-center gap-2">
+              <CalendarDays className="size-5 shrink-0" />
+              {!collapsed && <span className="text-lg font-semibold tracking-tight">Prumo</span>}
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 text-muted-foreground"
+              aria-label={collapsed ? "Expandir menu" : "Recolher menu"}
+              title={`${collapsed ? "Expandir" : "Recolher"} menu (Ctrl+B)`}
+              onClick={() => setOpen(collapsed)}
+            >
+              {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+            </Button>
           </div>
         </SidebarHeader>
         <SidebarContent>
@@ -175,15 +239,11 @@ export function AppSidebar({
             <SidebarGroupContent>
               <SidebarMenu>
                 <MItem variants={itemVariants} custom={0} initial="hidden" animate="show">
-                  <NavButton active={!settingsActive && !trashActive && !weekActive && !activeTag && filter === 4} onClick={() => onFilter(4)}>
+                  <NavButton collapsed={collapsed} tooltip={withCount("Caixa de entrada", counts.inbox)} active={!settingsActive && !trashActive && !weekActive && !activeTag && filter === 4} onClick={() => onFilter(4)}>
                     <Inbox />
                     <span>Caixa de entrada</span>
                   </NavButton>
-                  {counts.inbox > 0 && (
-                    <SidebarMenuBadge>
-                      <AnimatedCount value={counts.inbox} />
-                    </SidebarMenuBadge>
-                  )}
+                  {badgeOf(counts.inbox, <AnimatedCount value={counts.inbox} />)}
                 </MItem>
               </SidebarMenu>
             </SidebarGroupContent>
@@ -203,20 +263,16 @@ export function AppSidebar({
                         transition={{ duration: 0.6 }}
                       />
                     )}
-                    <NavButton active={!settingsActive && !trashActive && !weekActive && !activeTag && filter === f} onClick={() => onFilter(f)}>
+                    <NavButton collapsed={collapsed} tooltip={withCount(label, badge(f))} active={!settingsActive && !trashActive && !weekActive && !activeTag && filter === f} onClick={() => onFilter(f)}>
                       <Icon />
                       <span>{label}</span>
                     </NavButton>
-                    {badge(f) > 0 && (
-                      <SidebarMenuBadge>
-                        <AnimatedCount value={badge(f)} pulse={bump && bump.target === targetOf(f) ? bump.n : undefined} />
-                      </SidebarMenuBadge>
-                    )}
+                    {badgeOf(badge(f), <AnimatedCount value={badge(f)} pulse={bump && bump.target === targetOf(f) ? bump.n : undefined} />)}
                   </MItem>
                 ))}
                 {onWeek && (
                   <MItem variants={itemVariants} custom={ITEMS.length + 1} initial="hidden" animate="show">
-                    <NavButton active={weekActive && !settingsActive && !trashActive} onClick={onWeek}>
+                    <NavButton collapsed={collapsed} tooltip="Semana" active={weekActive && !settingsActive && !trashActive} onClick={onWeek}>
                       <CalendarRange />
                       <span>Semana</span>
                     </NavButton>
@@ -226,7 +282,7 @@ export function AppSidebar({
             </SidebarGroupContent>
           </SidebarGroup>
           <AnimatePresence initial={false}>
-            {tags.length > 0 && (
+            {tags.length > 0 && !collapsed && (
               <motion.div key="tags" variants={collapseVariants} initial="hidden" animate="show" exit="exit" className="overflow-hidden">
                 <SidebarGroup>
                   <SidebarGroupLabel>Tags</SidebarGroupLabel>
@@ -261,22 +317,20 @@ export function AppSidebar({
           <SidebarMenu>
             {onTrash && (
               <SidebarMenuItem>
-                <NavButton active={trashActive} onClick={onTrash}>
+                <NavButton collapsed={collapsed} tooltip="Lixeira" active={trashActive} onClick={onTrash}>
                   <Trash2 />
                   <span>Lixeira</span>
                 </NavButton>
               </SidebarMenuItem>
             )}
             <SidebarMenuItem>
-              <NavButton active={settingsActive} onClick={onSettings}>
+              <NavButton collapsed={collapsed} tooltip="Configurações" active={settingsActive} onClick={onSettings}>
                 <SettingsIcon />
                 <span>Configurações</span>
               </NavButton>
             </SidebarMenuItem>
+            <ThemeItem collapsed={collapsed} />
           </SidebarMenu>
-          <div className="flex justify-end px-1">
-            <ThemeToggle />
-          </div>
         </SidebarFooter>
       </div>
     </Sidebar>

@@ -34,7 +34,8 @@ pub fn quick_add_task(
     date: Option<String>,
     time: Option<String>,
 ) -> Result<i64, String> {
-    let auto = crate::settings::load().auto_approve;
+    // Digitada por quem está criando (sem IA): vai direto para as tarefas, sem passar pela caixa de entrada.
+    let auto = true;
     // Valida a hora antes de criar, para não deixar tarefa pela metade.
     let time = time.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
     if let Some(t) = &time {

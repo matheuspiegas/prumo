@@ -110,7 +110,7 @@ export function WeekView({
   activeTag: string | null;
   onClearTag: () => void;
   onOpenTask: (t: Task) => void;
-  pushUndo: (message: string, run: () => Promise<unknown> | void) => void;
+  pushUndo: (message: string, run: () => Promise<unknown> | void, opts?: { silent?: boolean }) => void;
 }) {
   const [from, setFrom] = useState<string | null>(null); // null = hoje
   const start = from ?? today;
@@ -295,8 +295,11 @@ export function WeekView({
             : dest.date === tomorrow
               ? "amanhã"
               : format(fromIso(dest.date!) ?? new Date(), "EEEE", { locale: ptBR });
-      pushUndo(dest.kind === "undated" ? "Movida para Sem data" : `Movida para ${label}`, () =>
-        api.moveTask(id, origin.date, origin.index),
+      // Sem toast a cada movimento: o Ctrl/⌘+Z desfaz em silêncio (por ~30 s).
+      pushUndo(
+        dest.kind === "undated" ? "Movida para Sem data" : `Movida para ${label}`,
+        () => api.moveTask(id, origin.date, origin.index),
+        { silent: true },
       );
     }
   };
@@ -422,7 +425,7 @@ export function WeekView({
       >
         <div
           className={`-mx-6 flex min-h-0 flex-1 scroll-pl-6 gap-3 overflow-x-auto px-6 pb-4 ${
-            activeId !== null ? "snap-none" : "snap-x snap-mandatory"
+            activeId !== null ? "snap-none" : "snap-x snap-proximity"
           }`}
         >
           {cols.map((c) => (

@@ -86,7 +86,9 @@ export function WeekColumn(p: ColumnProps) {
         )}
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-1">
+      {/* overscroll-y-contain: o fim da rolagem VERTICAL da coluna não "puxa" o quadro (só o eixo Y: o horizontal, como Shift+scroll, precisa passar ao quadro); scrollbar fina e discreta
+          em vez da barra larga do Windows, que empurrava os cartões ao aparecer. */}
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-2 pt-1 pb-2 [scrollbar-color:color-mix(in_oklab,var(--foreground)_22%,transparent)_transparent] [scrollbar-gutter:stable] [scrollbar-width:thin]">
         <SortableContext id={p.id} items={p.pending.map((t) => t.id)} strategy={verticalListSortingStrategy}>
           <AnimatePresence initial={false}>
             {p.pending.map((t) => (
