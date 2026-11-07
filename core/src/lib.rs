@@ -9,7 +9,7 @@ mod reminders; // lembretes com hora (due_time / reminded_at)
 pub use reminders::parse_hhmm;
 mod search; // busca
 mod subtasks; // subtarefas (parent_id)
-mod tags; // etiquetas (tags / task_tags)
+pub mod tags; // etiquetas (tags / task_tags)
 mod trash; // lixeira e desfazer (deleted_at)
 
 #[derive(Debug, Clone, PartialEq)]

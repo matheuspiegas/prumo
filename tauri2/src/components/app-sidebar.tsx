@@ -1,12 +1,13 @@
 import { motion } from "motion/react";
 import { bouncy } from "@/lib/motion";
-import { CalendarDays, CheckCheck, Inbox, ListTodo, Settings as SettingsIcon, Trash2, Sunrise, Sun } from "lucide-react";
+import { CalendarDays, CheckCheck, Hash, Inbox, ListTodo, Settings as SettingsIcon, Trash2, Sunrise, Sun } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuBadge,
@@ -14,7 +15,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
-import type { Counts, Filter } from "@/lib/api";
+import type { Counts, Filter, TagCount } from "@/lib/api";
 
 const ITEMS: { filter: Filter; label: string; icon: typeof Sun }[] = [
   { filter: 0, label: "Hoje", icon: Sun },
@@ -32,6 +33,9 @@ export function AppSidebar({
   onSettings,
   trashActive = false,
   onTrash,
+  tags = [],
+  activeTag = null,
+  onTag,
 }: {
   filter: Filter;
   onFilter: (f: Filter) => void;
@@ -42,6 +46,9 @@ export function AppSidebar({
   onSettings: () => void;
   trashActive?: boolean;
   onTrash?: () => void;
+  tags?: TagCount[];
+  activeTag?: string | null;
+  onTag?: (name: string) => void;
 }) {
   const targetOf = (f: Filter) => (f === 0 ? "today" : f === 1 ? "tomorrow" : f === 2 ? "all" : null);
   const badge = (f: Filter) => (f === 0 ? counts.today : f === 1 ? counts.tomorrow : 0);
@@ -58,7 +65,7 @@ export function AppSidebar({
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive={!settingsActive && !trashActive && filter === 4} onClick={() => onFilter(4)}>
+                <SidebarMenuButton isActive={!settingsActive && !trashActive && !activeTag && filter === 4} onClick={() => onFilter(4)}>
                   <Inbox />
                   <span>Caixa de entrada</span>
                 </SidebarMenuButton>
@@ -82,7 +89,7 @@ export function AppSidebar({
                       transition={{ duration: 0.6 }}
                     />
                   )}
-                  <SidebarMenuButton isActive={!settingsActive && !trashActive && filter === f} onClick={() => onFilter(f)}>
+                  <SidebarMenuButton isActive={!settingsActive && !trashActive && !activeTag && filter === f} onClick={() => onFilter(f)}>
                     <Icon />
                     <span>{label}</span>
                   </SidebarMenuButton>
@@ -103,6 +110,27 @@ export function AppSidebar({
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+        {tags.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Tags</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {tags.map((t) => (
+                  <SidebarMenuItem key={t.name}>
+                    <SidebarMenuButton
+                      isActive={!settingsActive && activeTag?.toLowerCase() === t.name.toLowerCase()}
+                      onClick={() => onTag?.(t.name)}
+                    >
+                      <Hash />
+                      <span className="truncate">{t.name}</span>
+                    </SidebarMenuButton>
+                    {t.count > 0 && <SidebarMenuBadge>{t.count}</SidebarMenuBadge>}
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
       <SidebarFooter className="p-2">
         <SidebarMenu>

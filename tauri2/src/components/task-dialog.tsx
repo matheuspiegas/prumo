@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { TagInput } from "@/components/tag-input";
 import { DatePicker } from "@/components/date-picker";
 import { PrioritySelect } from "@/components/priority-select";
 import { SubtasksList } from "@/components/subtasks-list";
@@ -41,6 +42,7 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
   const [saved, setSaved] = useState<Attachment[]>([]);
   const [pending, setPending] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [tags, setTags] = useState<string[]>([]);
 
   const loadAttachments = useCallback(async (id: number) => setSaved(await api.attachments(id)), []);
 
@@ -54,6 +56,7 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
     setTime(task?.dueTime ?? null);
     setPending([]);
     setSaved([]);
+    setTags(task?.tags ?? []);
     if (task) loadAttachments(task.id).catch((e) => toast.error(String(e)));
   }, [open, task, defaultDate, loadAttachments]);
 
@@ -114,12 +117,14 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
         if (priority !== task.priority) await api.setPriority(task.id, priority);
         if (recurrence !== (task.recurrence ?? null)) await api.setRecurrence(task.id, recurrence);
         if (time !== (task.dueTime ?? null)) await api.setTime(task.id, time);
+        await api.setTags(task.id, tags);
       } else {
         const id = await api.add(t, notes, date);
         if (priority) await api.setPriority(id, priority);
         if (recurrence) await api.setRecurrence(id, recurrence);
         if (time) await api.setTime(id, time);
         for (const p of pending) await api.attach(id, p);
+        if (tags.length) await api.setTags(id, tags);
       }
       onSaved();
       onClose();
@@ -169,6 +174,10 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
           <div className="flex flex-col gap-1.5">
             <Label>Repetir</Label>
             <RecurrenceSelect value={recurrence} onChange={setRecurrence} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Tags</Label>
+            <TagInput value={tags} onChange={setTags} />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="notes">Notas</Label>

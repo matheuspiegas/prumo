@@ -2,6 +2,7 @@ import { Check, Repeat, Sparkles, Trash2, X } from "lucide-react";
 import { recurrenceLabel } from "@/components/recurrence-select";
 import { motion, Reorder } from "motion/react";
 import { useRef, useState, type Ref } from "react";
+import { TagChip } from "@/components/tag-chip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -105,6 +106,14 @@ export function TaskRow({
         <Repeat className="size-3.5 shrink-0 text-muted-foreground" aria-label={recurrenceLabel(task.recurrence)}>
           <title>{recurrenceLabel(task.recurrence)}</title>
         </Repeat>
+      )}
+      {task.tags?.length > 0 && (
+        <span className="flex shrink-0 items-center gap-1">
+          {task.tags.slice(0, 3).map((t) => (
+            <TagChip key={t} name={t} />
+          ))}
+          {task.tags.length > 3 && <span className="text-xs text-muted-foreground">+{task.tags.length - 3}</span>}
+        </span>
       )}
       {label && (
         <span className={cn("text-xs text-muted-foreground", overdue && "font-medium text-destructive")}>

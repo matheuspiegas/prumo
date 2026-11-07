@@ -5,6 +5,7 @@ mod quickadd;
 mod reminders;
 mod settings;
 mod stt;
+mod tags_cmds;
 mod tray;
 mod voice;
 pub mod worker;
@@ -35,6 +36,22 @@ struct TaskDto {
     /// Progresso do checklist (preenchido em `list_tasks`).
     subtasks_done: i64,
     subtasks_total: i64,
+    tags: Vec<String>,
+}
+
+/// Converte tarefas em DTOs preenchendo tags e progresso do checklist (uma consulta agrupada cada).
+fn with_tags(db: &Db, tasks: Vec<Task>) -> Result<Vec<TaskDto>, String> {
+    let ids: Vec<i64> = tasks.iter().map(|t| t.id).collect();
+    let mut map = db.tags_for(&ids).map_err(err)?;
+    let progress = db.subtask_progress(&ids).map_err(err)?;
+    Ok(tasks
+        .into_iter()
+        .map(|t| {
+            let tags = map.remove(&t.id).unwrap_or_default();
+            let (done, total) = progress.get(&t.id).copied().unwrap_or((0, 0));
+            TaskDto { tags, subtasks_done: done, subtasks_total: total, ..t.into() }
+        })
+        .collect())
 }
 
 #[derive(Serialize)]
@@ -69,6 +86,7 @@ impl From<Task> for TaskDto {
             deleted_at: t.deleted_at,
             subtasks_done: 0,
             subtasks_total: 0,
+            tags: Vec::new(),
         }
     }
 }
@@ -93,18 +111,7 @@ fn list_tasks(db: State<AppDb>, filter: i32) -> Result<Vec<TaskDto>, String> {
         _ => db.inbox(),
     }
     .map_err(err)?;
-    let ids: Vec<i64> = tasks.iter().map(|t| t.id).collect();
-    let progress = db.subtask_progress(&ids).map_err(err)?;
-    Ok(tasks
-        .into_iter()
-        .map(|t| {
-            let (done, total) = progress.get(&t.id).copied().unwrap_or((0, 0));
-            let mut dto: TaskDto = t.into();
-            dto.subtasks_done = done;
-            dto.subtasks_total = total;
-            dto
-        })
-        .collect())
+    with_tags(&db, tasks)
 }
 
 #[tauri::command]
@@ -384,7 +391,13 @@ pub fn run() {
             dates,
             open_logs,
             quickadd::quick_add_task,
-            reminders::set_task_time,            voice::voice_start,
+            reminders::set_task_time,
+            tags_cmds::list_tags,
+            tags_cmds::set_task_tags,
+            tags_cmds::list_tasks_by_tag,
+            tags_cmds::rename_tag,
+            tags_cmds::delete_tag,
+            voice::voice_start,
             voice::voice_stop,
             voice::voice_cancel,
             voice::get_settings,
