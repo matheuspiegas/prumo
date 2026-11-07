@@ -119,6 +119,11 @@ fn delete_task(db: State<AppDb>, id: i64) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn reorder_tasks(db: State<AppDb>, ids: Vec<i64>) -> Result<(), String> {
+    lock(&db)?.reorder(&ids).map_err(err)
+}
+
+#[tauri::command]
 fn list_attachments(db: State<AppDb>, task_id: i64) -> Result<Vec<AttachmentDto>, String> {
     Ok(lock(&db)?
         .attachments(task_id)
@@ -182,6 +187,7 @@ pub fn run() {
             set_done,
             approve_task,
             delete_task,
+            reorder_tasks,
             list_attachments,
             add_attachment,
             delete_attachment,

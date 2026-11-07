@@ -100,7 +100,26 @@ impl Db {
             self.conn
                 .execute_batch("ALTER TABLE tasks ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")?;
         }
+        if !has("position")? {
+            // Preserva a ordem atual: position inicial = id.
+            self.conn.execute_batch(
+                "ALTER TABLE tasks ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
+                 UPDATE tasks SET position = id;",
+            )?;
+        }
         Ok(())
+    }
+
+    /// Define a ordem manual: `position` = índice em `ids`, numa transação.
+    pub fn reorder(&self, ids: &[i64]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        {
+            let mut st = tx.prepare("UPDATE tasks SET position = ?2 WHERE id = ?1")?;
+            for (i, id) in ids.iter().enumerate() {
+                st.execute(params![id, i as i64])?;
+            }
+        }
+        tx.commit()
     }
 
     pub fn add_task(&self, title: &str, notes: &str, due_date: Option<&str>) -> Result<i64> {
@@ -118,7 +137,8 @@ impl Db {
     ) -> Result<i64> {
         let status = if source == "manual" { "active" } else { "inbox" };
         self.conn.execute(
-            "INSERT INTO tasks (title, notes, due_date, source, status) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO tasks (title, notes, due_date, source, status, position)
+             VALUES (?1, ?2, ?3, ?4, ?5, (SELECT COALESCE(MAX(position), 0) + 1 FROM tasks))",
             params![title, notes, due_date, source, status],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -186,7 +206,7 @@ impl Db {
     /// Tarefas pendentes de uma data específica (`YYYY-MM-DD`).
     pub fn tasks_on(&self, date: &str) -> Result<Vec<Task>> {
         let mut st = self.conn.prepare(&format!(
-            "SELECT {TASK_COLS} FROM tasks WHERE status = 'active' AND due_date = ?1 ORDER BY done, id"
+            "SELECT {TASK_COLS} FROM tasks WHERE status = 'active' AND due_date = ?1 ORDER BY done, position, id"
         ))?;
         st.query_map([date], row_to_task)?.collect()
     }
@@ -194,7 +214,7 @@ impl Db {
     /// Todas as tarefas pendentes, ordenadas por data (sem data por último).
     pub fn pending(&self) -> Result<Vec<Task>> {
         let mut st = self.conn.prepare(&format!(
-            "SELECT {TASK_COLS} FROM tasks WHERE status = 'active' AND done = 0 ORDER BY due_date IS NULL, due_date, id"
+            "SELECT {TASK_COLS} FROM tasks WHERE status = 'active' AND done = 0 ORDER BY due_date IS NULL, due_date, position, id"
         ))?;
         st.query_map([], row_to_task)?.collect()
     }
@@ -352,6 +372,54 @@ mod tests {
         let t = db.pending().unwrap();
         assert_eq!(t.len(), 1);
         assert_eq!((t[0].source.as_str(), t[0].status.as_str()), ("manual", "active"));
+        drop(db);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn new_tasks_go_last_and_reorder_works() {
+        let db = Db::open_in_memory().unwrap();
+        let a = db.add_task("a", "", Some("2026-11-06")).unwrap();
+        let b = db.add_task("b", "", Some("2026-11-06")).unwrap();
+        let c = db.add_task("c", "", Some("2026-11-06")).unwrap();
+        let titles = |v: Vec<Task>| v.into_iter().map(|t| t.title).collect::<Vec<_>>();
+        assert_eq!(titles(db.tasks_on("2026-11-06").unwrap()), ["a", "b", "c"]);
+
+        db.reorder(&[c, a, b]).unwrap();
+        assert_eq!(titles(db.tasks_on("2026-11-06").unwrap()), ["c", "a", "b"]);
+        assert_eq!(titles(db.pending().unwrap()), ["c", "a", "b"]);
+
+        db.add_task("d", "", Some("2026-11-06")).unwrap();
+        assert_eq!(titles(db.tasks_on("2026-11-06").unwrap()), ["c", "a", "b", "d"]);
+
+        // concluídas vão para o fim em tasks_on
+        db.set_done(c, true).unwrap();
+        assert_eq!(titles(db.tasks_on("2026-11-06").unwrap()), ["a", "b", "d", "c"]);
+    }
+
+    #[test]
+    fn migration_backfills_position_in_id_order() {
+        let path = std::env::temp_dir().join(format!("prumo-pos-{}.db", std::process::id()));
+        std::fs::remove_file(&path).ok();
+        {
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(
+                "CREATE TABLE tasks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '', due_date TEXT, done INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')), source TEXT NOT NULL DEFAULT 'manual', status TEXT NOT NULL DEFAULT 'active');
+                 INSERT INTO tasks (title) VALUES ('um'), ('dois');",
+            )
+            .unwrap();
+        }
+        let db = Db::open(&path).unwrap();
+        db.add_task("tres", "", None).unwrap();
+        let t: Vec<_> = db.pending().unwrap().into_iter().map(|t| t.title).collect();
+        assert_eq!(t, ["um", "dois", "tres"]);
+        drop(db);
+        // reabrir não refaz o backfill
+        let db = Db::open(&path).unwrap();
+        db.reorder(&[3, 2, 1]).unwrap();
+        drop(db);
+        let db = Db::open(&path).unwrap();
+        assert_eq!(db.pending().unwrap()[0].title, "tres");
         drop(db);
         std::fs::remove_file(&path).ok();
     }

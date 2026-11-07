@@ -1,3 +1,5 @@
+import { motion } from "motion/react";
+import { bouncy } from "@/lib/motion";
 import { CalendarDays, CheckCheck, Inbox, ListTodo, Settings as SettingsIcon, Sunrise, Sun } from "lucide-react";
 import {
   Sidebar,
@@ -25,15 +27,19 @@ export function AppSidebar({
   filter,
   onFilter,
   counts,
+  bump,
   settingsActive,
   onSettings,
 }: {
   filter: Filter;
   onFilter: (f: Filter) => void;
   counts: Counts;
+  /** Pulso de chegada de uma tarefa aprovada (n muda a cada disparo). */
+  bump?: { target: "today" | "tomorrow" | "all"; n: number } | null;
   settingsActive: boolean;
   onSettings: () => void;
 }) {
+  const targetOf = (f: Filter) => (f === 0 ? "today" : f === 1 ? "tomorrow" : f === 2 ? "all" : null);
   const badge = (f: Filter) => (f === 0 ? counts.today : f === 1 ? counts.tomorrow : 0);
   return (
     <Sidebar collapsible="none" className="border-r">
@@ -61,12 +67,33 @@ export function AppSidebar({
           <SidebarGroupContent>
             <SidebarMenu>
               {ITEMS.map(({ filter: f, label, icon: Icon }) => (
-                <SidebarMenuItem key={f}>
+                <SidebarMenuItem key={f} data-fly-target={targetOf(f)}>
+                  {bump && bump.target === targetOf(f) && (
+                    <motion.span
+                      key={bump.n}
+                      aria-hidden
+                      className="pointer-events-none absolute inset-0 rounded-md bg-sidebar-accent"
+                      initial={{ opacity: 0.9 }}
+                      animate={{ opacity: 0 }}
+                      transition={{ duration: 0.6 }}
+                    />
+                  )}
                   <SidebarMenuButton isActive={!settingsActive && filter === f} onClick={() => onFilter(f)}>
                     <Icon />
                     <span>{label}</span>
                   </SidebarMenuButton>
-                  {badge(f) > 0 && <SidebarMenuBadge>{badge(f)}</SidebarMenuBadge>}
+                  {badge(f) > 0 && (
+                    <SidebarMenuBadge>
+                      <motion.span
+                        key={bump && bump.target === targetOf(f) ? bump.n : "idle"}
+                        className="inline-block"
+                        animate={bump && bump.target === targetOf(f) ? { scale: [1, 1.5, 1] } : undefined}
+                        transition={bouncy}
+                      >
+                        {badge(f)}
+                      </motion.span>
+                    </SidebarMenuBadge>
+                  )}
                 </SidebarMenuItem>
               ))}
             </SidebarMenu>

@@ -69,6 +69,7 @@ export const api = {
   attach: (taskId: number, path: string) => invoke<number>("add_attachment", { taskId, path }),
   detach: (id: number) => invoke<void>("delete_attachment", { id }),
   open: (path: string) => invoke<void>("open_attachment", { path }),
+  reorder: (ids: number[]) => invoke<void>("reorder_tasks", { ids }),
   voiceStart: () => invoke<void>("voice_start"),
   voiceStop: () => invoke<VoiceResult>("voice_stop"),
   voiceCancel: () => invoke<void>("voice_cancel"),

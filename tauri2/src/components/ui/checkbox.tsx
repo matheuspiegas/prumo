@@ -1,6 +1,6 @@
 import { Checkbox as CheckboxPrimitive } from "@base-ui/react/checkbox"
 import { cn } from "cn"
-import { CheckIcon } from "lucide-react"
+import { motion } from "motion/react"
 
 function Checkbox({ className, ...props }: CheckboxPrimitive.Root.Props) {
   return (
@@ -16,8 +16,24 @@ function Checkbox({ className, ...props }: CheckboxPrimitive.Root.Props) {
         data-slot="checkbox-indicator"
         className="grid place-content-center text-current transition-none [&>svg]:size-3.5"
       >
-        <CheckIcon
-        />
+        <motion.svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={3.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          initial={{ scale: 0.6 }}
+          animate={{ scale: 1 }}
+          transition={{ type: "spring", stiffness: 600, damping: 18 }}
+        >
+          <motion.path
+            d="M5 12.5l4.5 4.5L19 7"
+            initial={{ pathLength: 0 }}
+            animate={{ pathLength: 1 }}
+            transition={{ duration: 0.28, ease: "easeOut" }}
+          />
+        </motion.svg>
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   )

@@ -3,21 +3,34 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, SizedSample};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter};
 
 pub const TARGET_RATE: u32 = 16_000;
 const MAX_SECONDS: usize = 120;
+const LEVEL_INTERVAL: Duration = Duration::from_millis(33);
+
+/// RMS (0..1) → nível percebido (0..1) para fala: ganho 8 com saturação.
+pub fn level_from_rms(rms: f32) -> f32 {
+    if !rms.is_finite() {
+        return 0.0;
+    }
+    (rms * 8.0).clamp(0.0, 1.0)
+}
 
 pub struct Recording {
     stop: mpsc::Sender<()>,
     handle: JoinHandle<Result<Vec<f32>, String>>,
+    app: AppHandle,
 }
 
 impl Recording {
     /// Encerra a gravação e devolve as amostras (mono, 16 kHz).
     pub fn finish(self) -> Result<Vec<f32>, String> {
         let _ = self.stop.send(());
-        self.handle.join().map_err(|_| "A gravação falhou".to_string())?
+        let res = self.handle.join().map_err(|_| "A gravação falhou".to_string())?;
+        let _ = self.app.emit("voice-level", 0.0f32);
+        res
     }
 }
 
@@ -27,15 +40,32 @@ fn collect<T: SizedSample + Send + 'static>(
     buf: Arc<Mutex<Vec<f32>>>,
     limit: usize,
     conv: fn(T) -> f32,
+    app: AppHandle,
+    rate: u32,
 ) -> Result<cpal::Stream, String> {
+    let _ = rate;
+    let mut sq_sum = 0.0f64;
+    let mut count = 0usize;
+    let mut last_emit = Instant::now();
     device
         .build_input_stream(
             config.clone(),
             move |data: &[T], _| {
+                let samples: Vec<f32> = data.iter().map(|s| conv(*s)).collect();
+                // Lock só pelo tempo de copiar as amostras.
                 if let Ok(mut b) = buf.lock() {
                     if b.len() < limit {
-                        b.extend(data.iter().map(|s| conv(*s)));
+                        b.extend_from_slice(&samples);
                     }
+                }
+                // ~30 Hz: acumula amostras e emite o RMS da janela.
+                sq_sum += samples.iter().map(|s| (*s as f64) * (*s as f64)).sum::<f64>();
+                count += samples.len();
+                if last_emit.elapsed() >= LEVEL_INTERVAL && count > 0 {
+                    let _ = app.emit("voice-level", level_from_rms((sq_sum / count as f64).sqrt() as f32));
+                    sq_sum = 0.0;
+                    count = 0;
+                    last_emit = Instant::now();
                 }
             },
             |e| eprintln!("erro de áudio: {e}"),
@@ -44,11 +74,12 @@ fn collect<T: SizedSample + Send + 'static>(
         .map_err(|e| format!("Não foi possível abrir o microfone: {e}"))
 }
 
-pub fn start() -> Result<Recording, String> {
+pub fn start(app: AppHandle) -> Result<Recording, String> {
     let (stop_tx, stop_rx) = mpsc::channel::<()>();
     let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
 
     // O `Stream` do cpal não é `Send` em algumas plataformas: vive numa thread própria.
+    let app_cb = app.clone();
     let handle = std::thread::spawn(move || -> Result<Vec<f32>, String> {
         let setup = || -> Result<(cpal::Stream, Arc<Mutex<Vec<f32>>>, u32, usize), String> {
             let device = cpal::default_host()
@@ -60,9 +91,9 @@ pub fn start() -> Result<Recording, String> {
             let buf = Arc::new(Mutex::new(Vec::new()));
             let limit = rate as usize * channels * MAX_SECONDS;
             let stream = match fmt {
-                SampleFormat::F32 => collect::<f32>(&device, &stream_cfg, buf.clone(), limit, |s| s)?,
-                SampleFormat::I16 => collect::<i16>(&device, &stream_cfg, buf.clone(), limit, |s| s as f32 / 32768.0)?,
-                SampleFormat::U16 => collect::<u16>(&device, &stream_cfg, buf.clone(), limit, |s| (s as f32 - 32768.0) / 32768.0)?,
+                SampleFormat::F32 => collect::<f32>(&device, &stream_cfg, buf.clone(), limit, |s| s, app_cb.clone(), rate)?,
+                SampleFormat::I16 => collect::<i16>(&device, &stream_cfg, buf.clone(), limit, |s| s as f32 / 32768.0, app_cb.clone(), rate)?,
+                SampleFormat::U16 => collect::<u16>(&device, &stream_cfg, buf.clone(), limit, |s| (s as f32 - 32768.0) / 32768.0, app_cb.clone(), rate)?,
                 other => return Err(format!("Formato de áudio não suportado: {other:?}")),
             };
             stream.play().map_err(|e| format!("Não foi possível iniciar a gravação: {e}"))?;
@@ -84,7 +115,7 @@ pub fn start() -> Result<Recording, String> {
     });
 
     match ready_rx.recv_timeout(Duration::from_secs(10)) {
-        Ok(Ok(())) => Ok(Recording { stop: stop_tx, handle }),
+        Ok(Ok(())) => Ok(Recording { stop: stop_tx, handle, app }),
         Ok(Err(e)) => Err(e),
         Err(_) => Err("Tempo esgotado ao abrir o microfone".into()),
     }
@@ -119,6 +150,14 @@ mod tests {
         let out = to_mono_16k(&raw, 2, 48_000);
         assert_eq!(out.len(), 1600);
         assert!(out.iter().all(|s| (s - 0.5).abs() < 1e-6));
+    }
+
+    #[test]
+    fn level_curve() {
+        assert_eq!(level_from_rms(0.0), 0.0);
+        assert!((level_from_rms(0.05) - 0.4).abs() < 1e-6);
+        assert_eq!(level_from_rms(0.5), 1.0);
+        assert_eq!(level_from_rms(f32::NAN), 0.0);
     }
 
     #[test]
