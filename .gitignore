@@ -16,3 +16,7 @@ dist/
 *.db
 *.db-shm
 *.db-wal
+
+# Exploração de logos (fica só local; a logo oficial é branding/app-icon.svg)
+branding/logos/
+branding/gallery.html
