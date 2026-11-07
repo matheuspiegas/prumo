@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, type Task } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { DUR_BASE, DUR_FAST, easeOut } from "@/lib/motion";
+import { DUR_BASE, DUR_FAST, easeOut, softSpring } from "@/lib/motion";
 
 /** Mini barra de progresso "2/5" usada na linha da tarefa. */
 export function SubtaskProgress({ done, total }: { done: number; total: number }) {
@@ -19,7 +19,7 @@ export function SubtaskProgress({ done, total }: { done: number; total: number }
       title={`${done} de ${total} subtarefas`}
     >
       <span className="h-1 w-8 overflow-hidden rounded-full bg-muted">
-        <span className="block h-full bg-primary transition-all" style={{ width: `${(done / total) * 100}%` }} />
+        <motion.span className="block h-full bg-primary" initial={false} animate={{ width: `${(done / total) * 100}%` }} transition={softSpring} />
       </span>
       {done}/{total}
     </span>
