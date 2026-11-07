@@ -6,6 +6,7 @@ mod settings;
 mod stt;
 mod tray;
 mod voice;
+pub mod worker;
 
 use serde::Serialize;
 use std::{path::PathBuf, sync::Mutex};

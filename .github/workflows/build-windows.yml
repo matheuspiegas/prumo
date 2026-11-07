@@ -30,6 +30,8 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: tauri2/src-tauri
+          # Muda a chave quando a configuração do ggml muda, para não reaproveitar um build antigo.
+          key: ggml-native-off
 
       - name: Instalar dependências do frontend
         working-directory: tauri2
@@ -38,6 +40,11 @@ jobs:
       # Gera os instaladores (NSIS .exe e MSI) e os anexa à execução como artefatos.
       # Sem tagName/releaseId a action não cria release nenhuma.
       - uses: tauri-apps/tauri-action@v1
+        env:
+          # Sem isto o ggml é otimizado para a CPU do servidor de build (que costuma ter AVX-512) e
+          # o app cai com "instrução ilegal" em CPUs que não têm essas instruções. NATIVE=OFF usa um
+          # piso portátil (AVX2), como o crate já faz no macOS.
+          TRANSCRIBE_CMAKE_ARGS: -DGGML_NATIVE=OFF
         with:
           projectPath: tauri2
           # Liga o motor ggml (Whisper .bin e .gguf, como no Handy). Compila C++ com CMake,
