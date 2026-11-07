@@ -21,6 +21,7 @@ export type Settings = {
   claudePath: string | null;
   autoApprove: boolean;
   shortcut: string;
+  quickAddShortcut: string;
 };
 export type ModelInfo = {
   id: string;
@@ -70,6 +71,7 @@ export const api = {
   detach: (id: number) => invoke<void>("delete_attachment", { id }),
   open: (path: string) => invoke<void>("open_attachment", { path }),
   reorder: (ids: number[]) => invoke<void>("reorder_tasks", { ids }),
+  quickAdd: (title: string, date: string | null) => invoke<number>("quick_add_task", { title, date }),
   openLogs: () => invoke<string>("open_logs"),
   voiceStart: () => invoke<void>("voice_start"),
   voiceStop: () => invoke<VoiceResult>("voice_stop"),

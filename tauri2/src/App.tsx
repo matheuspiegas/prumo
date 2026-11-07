@@ -3,6 +3,7 @@ import { animate, AnimatePresence, motion, Reorder, useReducedMotion } from "mot
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Inbox, ListChecks, Plus } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import { AppSidebar } from "@/components/app-sidebar";
 import { TaskDialog } from "@/components/task-dialog";
@@ -126,6 +127,14 @@ export default function App() {
   useEffect(() => {
     window.addEventListener("focus", refresh);
     return () => window.removeEventListener("focus", refresh);
+  }, [refresh]);
+
+  // Tarefas criadas pela janela quick-add (outro webview) chegam por evento.
+  useEffect(() => {
+    const sub = listen("tasks-changed", () => refresh());
+    return () => {
+      sub.then((un) => un());
+    };
   }, [refresh]);
 
   const [today, tomorrow] = dates;

@@ -6,7 +6,8 @@ use crate::{AppDb, audio};
 use serde::Serialize;
 use std::{sync::Mutex, time::Instant};
 use tauri::{AppHandle, Emitter, State};
-use tauri_plugin_global_shortcut::GlobalShortcutExt;
+use std::sync::atomic::{AtomicU32, Ordering};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
 pub struct VoiceState(pub Mutex<Option<audio::Recording>>);
 
@@ -115,6 +116,8 @@ pub async fn voice_stop(
     if s.auto_approve {
         db.approve_task(id).map_err(err)?;
     }
+    drop(db);
+    let _ = app.emit("tasks-changed", ());
     Ok(VoiceResult {
         transcript: out.transcript,
         title: out.parsed.title,
@@ -131,17 +134,40 @@ pub fn get_settings() -> Settings {
     settings::load()
 }
 
-/// (Re)registra o atalho global; ao ser pressionado o plugin emite `voice-toggle`.
-pub fn register_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), String> {
+/// Id do atalho do quick-add, para o handler distinguir qual atalho foi pressionado.
+static QUICK_ADD_ID: AtomicU32 = AtomicU32::new(0);
+
+pub fn is_quick_add(shortcut: &Shortcut) -> bool {
+    shortcut.id() == QUICK_ADD_ID.load(Ordering::Relaxed)
+}
+
+/// (Re)registra os dois atalhos globais: voz (`voice-toggle`) e quick-add (abre a janelinha).
+/// Um atalho inválido ou em uso não impede o outro; os erros são reunidos na resposta.
+pub fn register_shortcut(app: &AppHandle, voice: &str, quick_add: &str) -> Result<(), String> {
     let gs = app.global_shortcut();
     gs.unregister_all().map_err(err)?;
-    gs.register(shortcut).map_err(|e| format!("Atalho inválido ou já em uso ({shortcut}): {e}"))
+    QUICK_ADD_ID.store(0, Ordering::Relaxed);
+    if voice.eq_ignore_ascii_case(quick_add) {
+        return Err("O atalho de voz e o da tarefa rápida precisam ser diferentes".into());
+    }
+    let mut erros = Vec::new();
+    if let Err(e) = gs.register(voice) {
+        erros.push(format!("Atalho de voz inválido ou já em uso ({voice}): {e}"));
+    }
+    match quick_add.parse::<Shortcut>() {
+        Ok(sc) => match gs.register(sc) {
+            Ok(()) => QUICK_ADD_ID.store(sc.id(), Ordering::Relaxed),
+            Err(e) => erros.push(format!("Atalho da tarefa rápida inválido ou já em uso ({quick_add}): {e}")),
+        },
+        Err(e) => erros.push(format!("Atalho da tarefa rápida inválido ({quick_add}): {e}")),
+    }
+    if erros.is_empty() { Ok(()) } else { Err(erros.join("\n")) }
 }
 
 #[tauri::command]
 pub fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String> {
     let saved = settings::save(&settings).map_err(err)?;
-    register_shortcut(&app, &saved.shortcut)?;
+    register_shortcut(&app, &saved.shortcut, &saved.quick_add_shortcut)?;
     Ok(saved)
 }
 

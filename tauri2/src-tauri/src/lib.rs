@@ -1,8 +1,10 @@
 mod audio;
 mod interpret;
 mod logging;
+mod quickadd;
 mod settings;
 mod stt;
+mod tray;
 mod voice;
 
 use serde::Serialize;
@@ -170,13 +172,20 @@ fn dates() -> (String, String) {
 pub fn run() {
     logging::init();
     tauri::Builder::default()
+        // Deve ser o primeiro plugin: uma segunda execução só mostra a janela existente.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::show_main(app)))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
+                .with_handler(|app, shortcut, event| {
                     if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                        let _ = app.emit("voice-toggle", ());
+                        if voice::is_quick_add(shortcut) {
+                            quickadd::open(app);
+                        } else {
+                            // Só a janela principal trata a voz (o quick-add tem o próprio fluxo).
+                            let _ = app.emit_to("main", "voice-toggle", ());
+                        }
                     }
                 })
                 .build(),
@@ -186,10 +195,35 @@ pub fn run() {
             std::fs::create_dir_all(&dir)?;
             app.manage(AppDb(Mutex::new(Db::open(dir.join("prumo.db"))?)));
             app.manage(voice::VoiceState(Mutex::new(None)));
-            if let Err(e) = voice::register_shortcut(app.handle(), &settings::load().shortcut) {
-                eprintln!("{e}");
+            quickadd::create(app.handle())?;
+            let cfg = settings::load();
+            if let Err(e) = voice::register_shortcut(app.handle(), &cfg.shortcut, &cfg.quick_add_shortcut) {
+                plog!("atalhos: {e}");
             }
+            tray::setup(app.handle())?;
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // A janelinha do quick-add some ao perder o foco ou ser fechada.
+            if window.label() == quickadd::LABEL {
+                match event {
+                    tauri::WindowEvent::Focused(false) => {
+                        let _ = window.hide();
+                    }
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                    _ => {}
+                }
+            }
+            // Fechar a janela principal só a esconde; "Sair" no tray encerra o app.
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    tray::hide_main(window.app_handle());
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             list_tasks,
@@ -206,6 +240,7 @@ pub fn run() {
             open_attachment,
             dates,
             open_logs,
+            quickadd::quick_add_task,
             voice::voice_start,
             voice::voice_stop,
             voice::voice_cancel,

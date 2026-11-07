@@ -17,6 +17,13 @@ pub struct Settings {
     pub auto_approve: bool,
     /// Atalho global para iniciar/parar a gravação.
     pub shortcut: String,
+    /// Atalho global que abre a janelinha de tarefa rápida.
+    pub quick_add_shortcut: String,
+}
+
+/// Alt+Space no Windows abre o menu do sistema (e conflita com o PowerToys Run).
+pub fn default_quick_add_shortcut() -> &'static str {
+    if cfg!(target_os = "macos") { "Alt+Space" } else { "Ctrl+Alt+Space" }
 }
 
 impl Default for Settings {
@@ -28,6 +35,7 @@ impl Default for Settings {
             claude_path: None,
             auto_approve: false,
             shortcut: "CommandOrControl+Shift+Space".into(),
+            quick_add_shortcut: default_quick_add_shortcut().into(),
         }
     }
 }
@@ -48,6 +56,14 @@ impl Settings {
         self.shortcut = self.shortcut.trim().to_string();
         if self.shortcut.is_empty() {
             self.shortcut = Self::default().shortcut;
+        }
+        self.quick_add_shortcut = self.quick_add_shortcut.trim().to_string();
+        if self.quick_add_shortcut.is_empty() || self.quick_add_shortcut.eq_ignore_ascii_case(&self.shortcut) {
+            self.quick_add_shortcut = default_quick_add_shortcut().into();
+            // Se o padrão também colidir com o atalho de voz, o de voz volta ao seu padrão.
+            if self.quick_add_shortcut.eq_ignore_ascii_case(&self.shortcut) {
+                self.shortcut = Self::default().shortcut;
+            }
         }
         self.claude_path = self.claude_path.filter(|p| !p.trim().is_empty());
         self.stt_model_dir = self.stt_model_dir.filter(|p| !p.trim().is_empty());
@@ -92,5 +108,18 @@ mod tests {
         let s: Settings = serde_json::from_str(r#"{"claudeEffort":"high"}"#).unwrap();
         assert_eq!(s.claude_effort, "high");
         assert_eq!(s.claude_model, "haiku");
+    }
+
+    #[test]
+    fn quick_add_shortcut_default_empty_and_conflict() {
+        let d = Settings::default();
+        assert_eq!(d.quick_add_shortcut, default_quick_add_shortcut());
+        let vazio = Settings { quick_add_shortcut: "  ".into(), ..Default::default() }.sanitized();
+        assert_eq!(vazio.quick_add_shortcut, default_quick_add_shortcut());
+        let igual = Settings { shortcut: "Ctrl+K".into(), quick_add_shortcut: "ctrl+k".into(), ..Default::default() }.sanitized();
+        assert_eq!(igual.quick_add_shortcut, default_quick_add_shortcut());
+        assert_eq!(igual.shortcut, "Ctrl+K");
+        let ok = Settings { quick_add_shortcut: "Ctrl+J".into(), ..Default::default() }.sanitized();
+        assert_eq!(ok.quick_add_shortcut, "Ctrl+J");
     }
 }

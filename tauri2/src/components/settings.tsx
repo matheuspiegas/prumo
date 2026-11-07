@@ -68,6 +68,7 @@ export function SettingsView() {
   const [testing, setTesting] = useState(false);
   const [test, setTest] = useState<{ ok: true; r: ClaudeTest } | { ok: false; e: string } | null>(null);
   const [capturing, setCapturing] = useState(false);
+  const [capturingQuick, setCapturingQuick] = useState(false);
 
   const detect = useCallback((path: string | null) => api.detectClaude(path).then(setClaude).catch(() => {}), []);
 
@@ -194,6 +195,23 @@ export function SettingsView() {
                   const a = acceleratorFromEvent(e);
                   if (a) {
                     patch({ shortcut: a });
+                    e.currentTarget.blur();
+                  }
+                }}
+                className="max-w-48 cursor-pointer"
+              />
+            </Field>
+            <Field label="Atalho da tarefa rápida" hint="Abre uma janelinha para digitar ou ditar uma tarefa de qualquer app. Precisa ser diferente do atalho de voz.">
+              <Input
+                readOnly
+                value={capturingQuick ? "Pressione o atalho…" : prettyShortcut(form.quickAddShortcut)}
+                onFocus={() => setCapturingQuick(true)}
+                onBlur={() => setCapturingQuick(false)}
+                onKeyDown={(e) => {
+                  e.preventDefault();
+                  const a = acceleratorFromEvent(e);
+                  if (a) {
+                    patch({ quickAddShortcut: a });
                     e.currentTarget.blur();
                   }
                 }}
