@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { TagInput } from "@/components/tag-input";
 import { DatePicker } from "@/components/date-picker";
 import { api, baseName, formatSize, type Attachment, type Task } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -34,6 +35,7 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
   const [saved, setSaved] = useState<Attachment[]>([]);
   const [pending, setPending] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [tags, setTags] = useState<string[]>([]);
 
   const loadAttachments = useCallback(async (id: number) => setSaved(await api.attachments(id)), []);
 
@@ -44,6 +46,7 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
     setDate(task ? task.due : defaultDate);
     setPending([]);
     setSaved([]);
+    setTags(task?.tags ?? []);
     if (task) loadAttachments(task.id).catch((e) => toast.error(String(e)));
   }, [open, task, defaultDate, loadAttachments]);
 
@@ -101,9 +104,11 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
     try {
       if (task) {
         await api.update(task.id, t, notes, date);
+        await api.setTags(task.id, tags);
       } else {
         const id = await api.add(t, notes, date);
         for (const p of pending) await api.attach(id, p);
+        if (tags.length) await api.setTags(id, tags);
       }
       onSaved();
       onClose();
@@ -142,6 +147,10 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
           <div className="flex flex-col gap-1.5">
             <Label>Data</Label>
             <DatePicker value={date} onChange={setDate} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Tags</Label>
+            <TagInput value={tags} onChange={setTags} />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="notes">Notas</Label>

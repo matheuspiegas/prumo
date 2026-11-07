@@ -1,4 +1,5 @@
 use rusqlite::{params, Connection, Result};
+pub mod tags;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq)]

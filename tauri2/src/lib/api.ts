@@ -10,8 +10,10 @@ export type Task = {
   done: boolean;
   source: string;
   status: string;
+  tags: string[];
 };
 export type Attachment = { id: number; filename: string; path: string; size: number };
+export type TagCount = { name: string; count: number };
 export type Counts = { today: number; tomorrow: number; inbox: number };
 
 export type Settings = {
@@ -70,6 +72,9 @@ export const api = {
   attach: (taskId: number, path: string) => invoke<number>("add_attachment", { taskId, path }),
   detach: (id: number) => invoke<void>("delete_attachment", { id }),
   open: (path: string) => invoke<void>("open_attachment", { path }),
+  tags: () => invoke<TagCount[]>("list_tags"),
+  setTags: (taskId: number, tags: string[]) => invoke<void>("set_task_tags", { taskId, tags }),
+  listByTag: (name: string) => invoke<Task[]>("list_tasks_by_tag", { name }),
   reorder: (ids: number[]) => invoke<void>("reorder_tasks", { ids }),
   quickAdd: (title: string, date: string | null) => invoke<number>("quick_add_task", { title, date }),
   openLogs: () => invoke<string>("open_logs"),

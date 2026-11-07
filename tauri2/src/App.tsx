@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
-import { api, type Counts, type Filter, type Task } from "@/lib/api";
+import { api, type Counts, type Filter, type Task, type TagCount } from "@/lib/api";
 import { DONE_EXIT_DELAY, listVariants, STAGGER_MAX, STAGGER_STEP } from "@/lib/motion";
 
 const TITLES = ["Hoje", "Amanhã", "Todas as tarefas", "Concluídas", "Caixa de entrada"];
@@ -36,6 +36,10 @@ export default function App() {
   const [dates, setDates] = useState<[string, string]>(["", ""]);
   const [quick, setQuick] = useState("");
   const [dialog, setDialog] = useState<DialogState>({ open: false, task: null });
+  // Filtro por tag (independente de Filter); quando definido, filter fica em 2.
+  const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [tagList, setTagList] = useState<TagCount[]>([]);
+  const activeTagRef = useRef<string | null>(null);
   const [view, setView] = useState<"tasks" | "settings">("tasks");
   const [shortcut, setShortcut] = useState("CommandOrControl+Shift+Space");
 
@@ -58,6 +62,7 @@ export default function App() {
   const bumpN = useRef(0);
 
   filterRef.current = filter;
+  activeTagRef.current = activeTag;
   useEffect(() => {
     tasksRef.current = tasks;
   }, [tasks]);
@@ -74,8 +79,15 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [list, c, d] = await Promise.all([api.list(filter), api.counts(), api.dates()]);
-      if (filterRef.current !== filter) return; // resposta de um filtro já abandonado
+      const [list, c, d, tg] = await Promise.all([
+        activeTag ? api.listByTag(activeTag) : api.list(filter),
+        api.counts(),
+        api.dates(),
+        api.tags(),
+      ]);
+      if (filterRef.current !== filter || activeTagRef.current !== activeTag) return; // resposta de um filtro já abandonado
+      setTagList(tg);
+      if (activeTag && !tg.some((t) => t.name.toLowerCase() === activeTag.toLowerCase())) setActiveTag(null);
       setCounts(c);
       setDates(d);
       if (draggingRef.current) return; // não sobrescreve a ordem durante o arrasto
@@ -99,7 +111,7 @@ export default function App() {
     } catch (e) {
       toast.error(String(e));
     }
-  }, [filter]);
+  }, [filter, activeTag]);
 
   // Troca de filtro / unmount: limpa timers e estados otimistas.
   useEffect(() => {
@@ -110,7 +122,7 @@ export default function App() {
       pendingRef.current = new Map();
       setPending(pendingRef.current);
     };
-  }, [filter]);
+  }, [filter, activeTag]);
 
   useEffect(() => {
     refresh();
@@ -168,6 +180,7 @@ export default function App() {
 
   const commitOrder = () => {
     draggingRef.current = false;
+    if (activeTag) return refresh(); // subconjunto filtrado: não grava a ordem
     api.reorder(tasksRef.current.map((t) => t.id)).catch((e) => {
       toast.error(String(e));
       refresh();
@@ -246,7 +259,15 @@ export default function App() {
     <SidebarProvider className="h-screen">
       <AppSidebar
         filter={filter}
+        tags={tagList}
+        activeTag={activeTag}
+        onTag={(name) => {
+          setActiveTag(name);
+          setFilter(2);
+          setView("tasks");
+        }}
         onFilter={(f) => {
+          setActiveTag(null);
           setFilter(f);
           setView("tasks");
         }}
@@ -262,7 +283,7 @@ export default function App() {
         <div className="mx-auto flex h-full w-full max-w-2xl flex-col gap-5 px-8 pt-8">
           <header className="flex items-end justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight">{TITLES[filter]}</h1>
+              <h1 className="text-2xl font-semibold tracking-tight">{activeTag ? `#${activeTag}` : TITLES[filter]}</h1>
               {subtitle && <p className="mt-1 text-sm text-muted-foreground first-letter:uppercase">{subtitle}</p>}
             </div>
             <div className="flex items-center gap-2">
@@ -288,7 +309,7 @@ export default function App() {
           {listFilter !== null && (
             <ListContainer
               key={listFilter}
-              reorderable={listFilter <= 2}
+              reorderable={listFilter <= 2 && !activeTag}
               tasks={tasks}
               setTasks={setTasks}
               firstPaint={firstPaint}
@@ -302,7 +323,7 @@ export default function App() {
                   today={today}
                   tomorrow={tomorrow}
                   inbox={filter === 4}
-                  reorderable={listFilter <= 2}
+                  reorderable={listFilter <= 2 && !activeTag}
                   delay={performance.now() < cascadeUntil.current ? Math.min(i, STAGGER_MAX) * STAGGER_STEP : 0}
                   onOpen={() => setDialog({ open: true, task: t })}
                   onToggle={(done) => toggle(t, done)}

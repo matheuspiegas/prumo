@@ -4,6 +4,7 @@ mod logging;
 mod quickadd;
 mod settings;
 mod stt;
+mod tags_cmds;
 mod tray;
 mod voice;
 pub mod worker;
@@ -25,6 +26,20 @@ struct TaskDto {
     done: bool,
     source: String,
     status: String,
+    tags: Vec<String>,
+}
+
+/// Converte tarefas em DTOs preenchendo as tags numa consulta só.
+fn with_tags(db: &Db, tasks: Vec<Task>) -> Result<Vec<TaskDto>, String> {
+    let ids: Vec<i64> = tasks.iter().map(|t| t.id).collect();
+    let mut map = db.tags_for(&ids).map_err(err)?;
+    Ok(tasks
+        .into_iter()
+        .map(|t| {
+            let tags = map.remove(&t.id).unwrap_or_default();
+            TaskDto { tags, ..t.into() }
+        })
+        .collect())
 }
 
 #[derive(Serialize)]
@@ -52,6 +67,7 @@ impl From<Task> for TaskDto {
             done: t.done,
             source: t.source,
             status: t.status,
+            tags: Vec::new(),
         }
     }
 }
@@ -76,7 +92,7 @@ fn list_tasks(db: State<AppDb>, filter: i32) -> Result<Vec<TaskDto>, String> {
         _ => db.inbox(),
     }
     .map_err(err)?;
-    Ok(tasks.into_iter().map(Into::into).collect())
+    with_tags(&db, tasks)
 }
 
 #[tauri::command]
@@ -242,6 +258,11 @@ pub fn run() {
             dates,
             open_logs,
             quickadd::quick_add_task,
+            tags_cmds::list_tags,
+            tags_cmds::set_task_tags,
+            tags_cmds::list_tasks_by_tag,
+            tags_cmds::rename_tag,
+            tags_cmds::delete_tag,
             voice::voice_start,
             voice::voice_stop,
             voice::voice_cancel,
