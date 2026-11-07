@@ -18,6 +18,8 @@ export type Task = {
   recurrence: string | null;
   parentId: number | null;
   deletedAt: string | null;
+  subtasksDone: number;
+  subtasksTotal: number;
 };
 export type Attachment = { id: number; filename: string; path: string; size: number };
 export type Counts = { today: number; tomorrow: number; inbox: number };
@@ -79,6 +81,10 @@ export const api = {
   detach: (id: number) => invoke<void>("delete_attachment", { id }),
   open: (path: string) => invoke<void>("open_attachment", { path }),
   reorder: (ids: number[]) => invoke<void>("reorder_tasks", { ids }),
+  addSubtask: (parentId: number, title: string) => invoke<number>("add_subtask", { parentId, title }),
+  subtasks: (parentId: number) => invoke<Task[]>("list_subtasks", { parentId }),
+  renameSubtask: (id: number, title: string) => invoke<void>("rename_subtask", { id, title }),
+  reorderSubtasks: (parentId: number, ids: number[]) => invoke<void>("reorder_subtasks", { parentId, ids }),
   quickAdd: (title: string, date: string | null) => invoke<number>("quick_add_task", { title, date }),
   openLogs: () => invoke<string>("open_logs"),
   voiceStart: () => invoke<void>("voice_start"),
