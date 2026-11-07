@@ -10,8 +10,14 @@ export type Task = {
   done: boolean;
   source: string;
   status: string;
-  /** `<unidade>:<n>` (day|week|month) ou null = não repete. */
+  /** 0 nenhuma, 1 baixa, 2 média, 3 alta */
+  priority: number;
+  /** "HH:MM" */
+  dueTime: string | null;
+  /** "<unidade>:<n>", unidade day|week|month (ex.: "week:2") */
   recurrence: string | null;
+  parentId: number | null;
+  deletedAt: string | null;
 };
 export type Attachment = { id: number; filename: string; path: string; size: number };
 export type Counts = { today: number; tomorrow: number; inbox: number };

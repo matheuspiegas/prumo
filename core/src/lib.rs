@@ -1,7 +1,14 @@
 use rusqlite::{params, Connection, Result};
 use std::path::{Path, PathBuf};
 
-pub mod recurrence;
+// Cada assunto vive no seu arquivo, com seu próprio `impl Db { ... }`.
+// Assim agentes diferentes não conflitam ao editar.
+pub mod recurrence; // recorrência de tarefas
+mod reminders; // lembretes com hora (due_time / reminded_at)
+mod search; // busca
+mod subtasks; // subtarefas (parent_id)
+mod tags; // etiquetas (tags / task_tags)
+mod trash; // lixeira e desfazer (deleted_at)
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Task {
@@ -15,8 +22,17 @@ pub struct Task {
     pub source: String,
     /// `active` ou `inbox` (aguardando aprovação, criada por um agente).
     pub status: String,
-    /// Recorrência `<unidade>:<n>` (ver `recurrence`); `None` = não repete.
+    /// 0 nenhuma, 1 baixa, 2 média, 3 alta.
+    pub priority: i64,
+    /// Hora no formato `HH:MM` (opcional).
+    pub due_time: Option<String>,
+    /// Recorrência no formato `<unidade>:<n>`, com unidade `day`, `week` ou
+    /// `month` (ex.: `week:2` = a cada 2 semanas). `None` = não repete.
     pub recurrence: Option<String>,
+    /// Se preenchido, esta tarefa é subtarefa da tarefa com esse id.
+    pub parent_id: Option<i64>,
+    /// Se preenchido (timestamp UTC do SQLite), a tarefa está na lixeira.
+    pub deleted_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -32,6 +48,8 @@ pub struct Db {
     conn: Connection,
 }
 
+/// Schema base (versão 1): tabelas originais. Colunas adicionadas depois
+/// (source, status, position e as da v2) entram via migração.
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS tasks (
     id         INTEGER PRIMARY KEY,
@@ -52,6 +70,12 @@ CREATE TABLE IF NOT EXISTS attachments (
 );
 ";
 
+/// Versão atual do schema (`PRAGMA user_version`).
+const SCHEMA_VERSION: i64 = 2;
+
+/// Filtro das listagens "normais": fora da lixeira e sem subtarefas.
+pub(crate) const LIVE: &str = "deleted_at IS NULL AND parent_id IS NULL";
+
 fn row_to_task(r: &rusqlite::Row) -> Result<Task> {
     Ok(Task {
         id: r.get(0)?,
@@ -61,11 +85,17 @@ fn row_to_task(r: &rusqlite::Row) -> Result<Task> {
         done: r.get::<_, i64>(4)? != 0,
         source: r.get(5)?,
         status: r.get(6)?,
-        recurrence: r.get(7)?,
+        priority: r.get(7)?,
+        due_time: r.get(8)?,
+        recurrence: r.get(9)?,
+        parent_id: r.get(10)?,
+        deleted_at: r.get(11)?,
     })
 }
 
-const TASK_COLS: &str = "id, title, notes, due_date, done, source, status, recurrence";
+/// Lidas por posição em `row_to_task`: mantenha as duas em sincronia.
+pub(crate) const TASK_COLS: &str =
+    "id, title, notes, due_date, done, source, status, priority, due_time, recurrence, parent_id, deleted_at";
 
 impl Db {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
@@ -82,38 +112,85 @@ impl Db {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
-        conn.execute_batch(SCHEMA)?;
         let db = Self { conn };
         db.migrate()?;
-        db.ensure_recurrence_column()?;
         Ok(db)
     }
 
-    /// Adiciona colunas novas em bancos criados por versões anteriores.
+    fn has_column(&self, table: &str, col: &str) -> Result<bool> {
+        self.conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+            [table, col],
+            |r| r.get::<_, i64>(0).map(|n| n > 0),
+        )
+    }
+
+    /// Migrações versionadas (`PRAGMA user_version`), não destrutivas e
+    /// idempotentes. Bancos novos e antigos chegam ao mesmo schema.
+    /// Para uma mudança futura: incremente `SCHEMA_VERSION` e adicione um bloco
+    /// `if version < N`.
     fn migrate(&self) -> Result<()> {
-        let has = |col: &str| -> Result<bool> {
-            self.conn.query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name = ?1",
-                [col],
-                |r| r.get::<_, i64>(0).map(|n| n > 0),
-            )
-        };
-        if !has("source")? {
-            self.conn
-                .execute_batch("ALTER TABLE tasks ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")?;
+        let version: i64 = self.conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version >= SCHEMA_VERSION {
+            return Ok(());
         }
-        if !has("status")? {
-            self.conn
-                .execute_batch("ALTER TABLE tasks ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")?;
+        let tx = self.conn.unchecked_transaction()?;
+        if version < 1 {
+            // Bancos anteriores ao versionamento (user_version = 0) podem estar
+            // em qualquer estágio das colunas antigas; cada passo se protege.
+            tx.execute_batch(SCHEMA)?;
+            if !self.has_column("tasks", "source")? {
+                tx.execute_batch("ALTER TABLE tasks ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")?;
+            }
+            if !self.has_column("tasks", "status")? {
+                tx.execute_batch("ALTER TABLE tasks ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")?;
+            }
+            if !self.has_column("tasks", "position")? {
+                // Preserva a ordem atual: position inicial = id.
+                tx.execute_batch(
+                    "ALTER TABLE tasks ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
+                     UPDATE tasks SET position = id;",
+                )?;
+            }
         }
-        if !has("position")? {
-            // Preserva a ordem atual: position inicial = id.
-            self.conn.execute_batch(
-                "ALTER TABLE tasks ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
-                 UPDATE tasks SET position = id;",
+        if version < 2 {
+            let cols = [
+                // 0 nenhuma, 1 baixa, 2 média, 3 alta
+                ("priority", "INTEGER NOT NULL DEFAULT 0"),
+                // "HH:MM"
+                ("due_time", "TEXT"),
+                // "<unidade>:<n>", unidade = day|week|month (ex.: "week:2")
+                ("recurrence", "TEXT"),
+                // quando o lembrete já foi disparado
+                ("reminded_at", "TEXT"),
+                // lixeira (soft delete)
+                ("deleted_at", "TEXT"),
+                // subtarefa = tarefa com parent_id
+                ("parent_id", "INTEGER REFERENCES tasks(id) ON DELETE CASCADE"),
+            ];
+            for (name, def) in cols {
+                if !self.has_column("tasks", name)? {
+                    tx.execute_batch(&format!("ALTER TABLE tasks ADD COLUMN {name} {def}"))?;
+                }
+            }
+            tx.execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_tasks_deleted ON tasks(deleted_at);
+                 CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id);
+                 CREATE TABLE IF NOT EXISTS tags (
+                     id   INTEGER PRIMARY KEY,
+                     name TEXT NOT NULL UNIQUE COLLATE NOCASE
+                 );
+                 CREATE TABLE IF NOT EXISTS task_tags (
+                     task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                     tag_id  INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+                     PRIMARY KEY (task_id, tag_id)
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_task_tags_tag ON task_tags(tag_id);",
             )?;
         }
-        Ok(())
+        // PRAGMA user_version não aceita parâmetros; o valor é uma constante nossa.
+        tx.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))?;
+        tx.commit()
     }
 
     /// Define a ordem manual: `position` = índice em `ids`, numa transação.
@@ -169,20 +246,24 @@ impl Db {
     /// Tarefas criadas por agentes, aguardando aprovação.
     pub fn inbox(&self) -> Result<Vec<Task>> {
         let mut st = self.conn.prepare(&format!(
-            "SELECT {TASK_COLS} FROM tasks WHERE status = 'inbox' ORDER BY id DESC"
+            "SELECT {TASK_COLS} FROM tasks WHERE status = 'inbox' AND {LIVE} ORDER BY id DESC"
         ))?;
         st.query_map([], row_to_task)?.collect()
     }
 
     pub fn inbox_count(&self) -> Result<i64> {
         self.conn
-            .query_row("SELECT COUNT(*) FROM tasks WHERE status = 'inbox'", [], |r| r.get(0))
+            .query_row(
+                &format!("SELECT COUNT(*) FROM tasks WHERE status = 'inbox' AND {LIVE}"),
+                [],
+                |r| r.get(0),
+            )
     }
 
     /// Quantidade de tarefas ativas e pendentes numa data.
     pub fn count_pending_on(&self, date: &str) -> Result<i64> {
         self.conn.query_row(
-            "SELECT COUNT(*) FROM tasks WHERE status = 'active' AND done = 0 AND due_date = ?1",
+            &format!("SELECT COUNT(*) FROM tasks WHERE status = 'active' AND done = 0 AND due_date = ?1 AND {LIVE}"),
             [date],
             |r| r.get(0),
         )
@@ -216,7 +297,7 @@ impl Db {
     /// Tarefas pendentes de uma data específica (`YYYY-MM-DD`).
     pub fn tasks_on(&self, date: &str) -> Result<Vec<Task>> {
         let mut st = self.conn.prepare(&format!(
-            "SELECT {TASK_COLS} FROM tasks WHERE status = 'active' AND due_date = ?1 ORDER BY done, position, id"
+            "SELECT {TASK_COLS} FROM tasks WHERE status = 'active' AND {LIVE} AND due_date = ?1 ORDER BY done, position, id"
         ))?;
         st.query_map([date], row_to_task)?.collect()
     }
@@ -224,14 +305,14 @@ impl Db {
     /// Todas as tarefas pendentes, ordenadas por data (sem data por último).
     pub fn pending(&self) -> Result<Vec<Task>> {
         let mut st = self.conn.prepare(&format!(
-            "SELECT {TASK_COLS} FROM tasks WHERE status = 'active' AND done = 0 ORDER BY due_date IS NULL, due_date, position, id"
+            "SELECT {TASK_COLS} FROM tasks WHERE status = 'active' AND {LIVE} AND done = 0 ORDER BY due_date IS NULL, due_date, position, id"
         ))?;
         st.query_map([], row_to_task)?.collect()
     }
 
     pub fn completed(&self) -> Result<Vec<Task>> {
         let mut st = self.conn.prepare(&format!(
-            "SELECT {TASK_COLS} FROM tasks WHERE status = 'active' AND done = 1 ORDER BY updated_at DESC"
+            "SELECT {TASK_COLS} FROM tasks WHERE status = 'active' AND {LIVE} AND done = 1 ORDER BY updated_at DESC"
         ))?;
         st.query_map([], row_to_task)?.collect()
     }
@@ -384,6 +465,90 @@ mod tests {
         assert_eq!((t[0].source.as_str(), t[0].status.as_str()), ("manual", "active"));
         drop(db);
         std::fs::remove_file(&path).ok();
+    }
+
+    /// Schema antigo (v0, antes do versionamento) com dados reais de usuário.
+    const OLD_SCHEMA: &str = "
+        CREATE TABLE tasks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '', due_date TEXT, done INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')), source TEXT NOT NULL DEFAULT 'manual', status TEXT NOT NULL DEFAULT 'active', position INTEGER NOT NULL DEFAULT 0);
+        CREATE INDEX idx_tasks_due ON tasks(due_date);
+        CREATE TABLE attachments (id INTEGER PRIMARY KEY, task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, filename TEXT NOT NULL, stored_path TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0);
+        INSERT INTO tasks (title, notes, due_date, done, source, status, position) VALUES
+            ('a', 'nota', '2026-11-06', 0, 'manual', 'active', 1),
+            ('b', '', NULL, 1, 'claude', 'active', 2),
+            ('c', '', '2026-11-07', 0, 'claude', 'inbox', 3);
+        INSERT INTO attachments (task_id, filename, stored_path, size) VALUES (1, 'x.txt', 'p', 3);
+    ";
+
+    fn user_version(db: &Db) -> i64 {
+        db.conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn migrates_v0_to_current_preserving_data_and_is_idempotent() {
+        let path = std::env::temp_dir().join(format!("prumo-v2-{}.db", std::process::id()));
+        std::fs::remove_file(&path).ok();
+        Connection::open(&path).unwrap().execute_batch(OLD_SCHEMA).unwrap();
+
+        let db = Db::open(&path).unwrap();
+        assert_eq!(user_version(&db), SCHEMA_VERSION);
+        let pending = db.pending().unwrap();
+        assert_eq!(pending.len(), 1);
+        let a = &pending[0];
+        assert_eq!((a.title.as_str(), a.notes.as_str()), ("a", "nota"));
+        assert_eq!(a.priority, 0);
+        assert!(a.due_time.is_none() && a.recurrence.is_none() && a.parent_id.is_none() && a.deleted_at.is_none());
+        assert_eq!(db.completed().unwrap().len(), 1);
+        assert_eq!(db.inbox_count().unwrap(), 1);
+        assert_eq!(db.attachments(1).unwrap().len(), 1);
+        for tbl in ["tags", "task_tags"] {
+            let n: i64 = db
+                .conn
+                .query_row("SELECT COUNT(*) FROM sqlite_master WHERE name = ?1", [tbl], |r| r.get(0))
+                .unwrap();
+            assert_eq!(n, 1, "{tbl}");
+        }
+        drop(db);
+
+        // Idempotente: reabrir não muda nada.
+        let db = Db::open(&path).unwrap();
+        assert_eq!(user_version(&db), SCHEMA_VERSION);
+        assert_eq!(db.pending().unwrap().len(), 1);
+        drop(db);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn new_and_migrated_databases_have_same_columns() {
+        let cols = |db: &Db| -> Vec<String> {
+            let mut st = db
+                .conn
+                .prepare("SELECT name FROM pragma_table_info('tasks') ORDER BY name")
+                .unwrap();
+            st.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect()
+        };
+        let path = std::env::temp_dir().join(format!("prumo-cmp-{}.db", std::process::id()));
+        std::fs::remove_file(&path).ok();
+        Connection::open(&path).unwrap().execute_batch(OLD_SCHEMA).unwrap();
+        let old = Db::open(&path).unwrap();
+        let new = Db::open_in_memory().unwrap();
+        assert_eq!(cols(&old), cols(&new));
+        drop(old);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn listings_hide_trashed_and_subtasks() {
+        let db = Db::open_in_memory().unwrap();
+        let a = db.add_task("a", "", Some("2026-11-06")).unwrap();
+        let b = db.add_task("b", "", Some("2026-11-06")).unwrap();
+        let c = db.add_task("c", "", Some("2026-11-06")).unwrap();
+        db.conn.execute("UPDATE tasks SET deleted_at = datetime('now') WHERE id = ?1", [b]).unwrap();
+        db.conn.execute("UPDATE tasks SET parent_id = ?2 WHERE id = ?1", [c, a]).unwrap();
+        assert_eq!(db.tasks_on("2026-11-06").unwrap().len(), 1);
+        assert_eq!(db.pending().unwrap().len(), 1);
+        assert_eq!(db.count_pending_on("2026-11-06").unwrap(), 1);
+        assert!(db.get_task(b).unwrap().deleted_at.is_some());
+        assert_eq!(db.get_task(c).unwrap().parent_id, Some(a));
     }
 
     #[test]

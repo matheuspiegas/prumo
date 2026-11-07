@@ -69,22 +69,6 @@ pub fn next_date(due: NaiveDate, rec: Recurrence) -> NaiveDate {
 }
 
 impl Db {
-    /// Garante a coluna `recurrence` (idempotente; a migração oficial pode já tê-la criado).
-    pub(crate) fn ensure_recurrence_column(&self) -> Result<()> {
-        if !self.has_column("recurrence")? {
-            self.conn.execute_batch("ALTER TABLE tasks ADD COLUMN recurrence TEXT")?;
-        }
-        Ok(())
-    }
-
-    fn has_column(&self, col: &str) -> Result<bool> {
-        self.conn.query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name = ?1",
-            [col],
-            |r| r.get::<_, i64>(0).map(|n| n > 0),
-        )
-    }
-
     pub fn get_recurrence(&self, id: i64) -> Result<Option<String>> {
         self.conn.query_row("SELECT recurrence FROM tasks WHERE id = ?1", [id], |r| r.get(0))
     }
@@ -129,7 +113,7 @@ impl Db {
             "title, notes, ?2, source, 'active', recurrence, (SELECT COALESCE(MAX(position), 0) + 1 FROM tasks)",
         );
         for c in ["priority", "due_time"] {
-            if self.has_column(c)? {
+            if self.has_column("tasks", c)? {
                 cols.push_str(&format!(", {c}"));
                 vals.push_str(&format!(", {c}"));
             }
@@ -230,9 +214,7 @@ mod tests {
     #[test]
     fn copies_tags_when_present() {
         let db = Db::open_in_memory().unwrap();
-        db.conn
-            .execute_batch("CREATE TABLE IF NOT EXISTS task_tags (task_id INTEGER, tag_id INTEGER);")
-            .unwrap();
+        db.conn.execute("INSERT INTO tags (id, name) VALUES (7, 'x')", []).unwrap();
         let id = db.add_task("t", "", Some("2999-01-01")).unwrap();
         db.conn.execute("INSERT INTO task_tags VALUES (?1, 7)", [id]).unwrap();
         db.set_recurrence(id, Some("day:1")).unwrap();
