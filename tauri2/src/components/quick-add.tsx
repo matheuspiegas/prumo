@@ -10,6 +10,7 @@ import { api, fromIso, toIso, type VoiceResult } from "@/lib/api";
 import { Calendar } from "@/components/ui/calendar";
 import { useVoice } from "@/hooks/use-voice";
 import { VoiceWaves } from "@/components/voice-waves";
+import { TimeField } from "@/components/time-field";
 import { cn } from "@/lib/utils";
 
 type Done = { title: string; date: string | null; inbox: boolean; warning: string | null };
@@ -26,6 +27,7 @@ export function QuickAdd() {
   const card = useRef<HTMLDivElement>(null);
   // Data escolhida (ISO) e datas de hoje/amanhã vindas do Rust.
   const [date, setDate] = useState<string | null>(null);
+  const [time, setTime] = useState<string | null>(null);
   const [today, setToday] = useState("");
   const [tomorrow, setTomorrow] = useState("");
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -63,6 +65,7 @@ export function QuickAdd() {
     setDone(null);
     setTitle("");
     setDate(null);
+    setTime(null);
     setCalendarOpen(false);
     calendarRef.current = false;
     animating.current = false;
@@ -157,7 +160,7 @@ export function QuickAdd() {
     setSaving(true);
     setError(null);
     try {
-      await api.quickAdd(t, date);
+      await api.quickAdd(t, date, time);
       // Sem aprovação automática a tarefa vai para a caixa de entrada (igual ao Rust).
       const auto = await api.getSettings().then((s) => s.autoApprove).catch(() => false);
       setTitle("");
@@ -288,6 +291,8 @@ export function QuickAdd() {
               ? format(fromIso(date)!, "d 'de' MMM", { locale: dfPtBR })
               : "Escolher data"}
           </button>
+          <TimeField value={time} onChange={setTime} className="h-7 w-28 text-xs" />
+
         </div>
         <AnimatePresence initial={false} onExitComplete={settle}>
           {calendarOpen && (

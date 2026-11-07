@@ -37,7 +37,7 @@ fn verificar(app: &AppHandle) {
             Ok(v) => v
                 .into_iter()
                 .map(|t| {
-                    let hora = db.due_time(t.id).ok().flatten().unwrap_or_default();
+                    let hora = t.due_time.clone().unwrap_or_default();
                     (t, hora)
                 })
                 .collect(),
@@ -84,12 +84,6 @@ pub fn set_task_time(app: AppHandle, db: State<AppDb>, id: i64, time: Option<Str
     db.0.lock().map_err(err)?.set_due_time(id, time.as_deref()).map_err(err)?;
     let _ = app.emit("tasks-changed", ());
     Ok(())
-}
-
-/// Horas de todas as tarefas que têm hora: `[[id, "HH:MM"], ...]`.
-#[tauri::command]
-pub fn get_due_times(db: State<AppDb>) -> Result<Vec<(i64, String)>, String> {
-    db.0.lock().map_err(err)?.due_times().map_err(err)
 }
 
 #[cfg(test)]

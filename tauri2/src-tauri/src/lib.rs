@@ -18,6 +18,7 @@ use tauri_plugin_opener::OpenerExt;
 pub struct AppDb(pub Mutex<Db>);
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TaskDto {
     id: i64,
     title: String,
@@ -26,6 +27,11 @@ struct TaskDto {
     done: bool,
     source: String,
     status: String,
+    priority: i64,
+    due_time: Option<String>,
+    recurrence: Option<String>,
+    parent_id: Option<i64>,
+    deleted_at: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -53,6 +59,11 @@ impl From<Task> for TaskDto {
             done: t.done,
             source: t.source,
             status: t.status,
+            priority: t.priority,
+            due_time: t.due_time,
+            recurrence: t.recurrence,
+            parent_id: t.parent_id,
+            deleted_at: t.deleted_at,
         }
     }
 }
@@ -245,9 +256,7 @@ pub fn run() {
             dates,
             open_logs,
             quickadd::quick_add_task,
-            reminders::set_task_time,
-            reminders::get_due_times,
-            voice::voice_start,
+            reminders::set_task_time,            voice::voice_start,
             voice::voice_stop,
             voice::voice_cancel,
             voice::get_settings,

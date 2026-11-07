@@ -10,6 +10,14 @@ export type Task = {
   done: boolean;
   source: string;
   status: string;
+  /** 0 nenhuma, 1 baixa, 2 média, 3 alta */
+  priority: number;
+  /** "HH:MM" */
+  dueTime: string | null;
+  /** "<unidade>:<n>", unidade day|week|month (ex.: "week:2") */
+  recurrence: string | null;
+  parentId: number | null;
+  deletedAt: string | null;
 };
 export type Attachment = { id: number; filename: string; path: string; size: number };
 export type Counts = { today: number; tomorrow: number; inbox: number };
@@ -22,6 +30,7 @@ export type Settings = {
   autoApprove: boolean;
   shortcut: string;
   quickAddShortcut: string;
+  reminders: boolean;
 };
 export type ModelInfo = {
   id: string;
@@ -71,7 +80,9 @@ export const api = {
   detach: (id: number) => invoke<void>("delete_attachment", { id }),
   open: (path: string) => invoke<void>("open_attachment", { path }),
   reorder: (ids: number[]) => invoke<void>("reorder_tasks", { ids }),
-  quickAdd: (title: string, date: string | null) => invoke<number>("quick_add_task", { title, date }),
+  quickAdd: (title: string, date: string | null, time: string | null = null) =>
+    invoke<number>("quick_add_task", { title, date, time }),
+  setTime: (id: number, time: string | null) => invoke<void>("set_task_time", { id, time }),
   openLogs: () => invoke<string>("open_logs"),
   voiceStart: () => invoke<void>("voice_start"),
   voiceStop: () => invoke<VoiceResult>("voice_stop"),

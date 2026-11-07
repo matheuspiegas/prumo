@@ -98,6 +98,11 @@ export function TaskRow({
           {label}
         </span>
       )}
+      {task.dueTime && (
+        <span className={cn("text-xs tabular-nums text-muted-foreground", overdue && "text-destructive")}>
+          {task.dueTime}
+        </span>
+      )}
       <span className="flex items-center gap-1" onClick={stop}>
         {inbox ? (
           <>

@@ -1,6 +1,6 @@
 //! Lembretes com hora: `tasks.due_time` ("HH:MM", horário local, opcional) e
 //! `tasks.reminded_at` (quando o lembrete já foi disparado).
-use crate::{Db, TASK_COLS, Task, row_to_task};
+use crate::{Db, LIVE, TASK_COLS, Task, row_to_task};
 use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime};
 use rusqlite::{Result, params};
 
@@ -14,21 +14,6 @@ pub fn parse_hhmm(s: &str) -> Option<String> {
 }
 
 impl Db {
-    /// Garante as colunas usadas pelos lembretes (idempotente).
-    pub(crate) fn ensure_reminder_columns(&self) -> Result<()> {
-        for col in ["due_time", "reminded_at", "deleted_at"] {
-            let has: i64 = self.conn.query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name = ?1",
-                [col],
-                |r| r.get(0),
-            )?;
-            if has == 0 {
-                self.conn.execute_batch(&format!("ALTER TABLE tasks ADD COLUMN {col} TEXT"))?;
-            }
-        }
-        Ok(())
-    }
-
     /// Define (ou limpa, com `None`) a hora da tarefa e rearma o lembrete.
     pub fn set_due_time(&self, id: i64, time: Option<&str>) -> Result<()> {
         let time = match time.map(str::trim).filter(|t| !t.is_empty()) {
@@ -43,18 +28,6 @@ impl Db {
             params![id, time],
         )?;
         Ok(())
-    }
-
-    pub fn due_time(&self, id: i64) -> Result<Option<String>> {
-        self.conn.query_row("SELECT due_time FROM tasks WHERE id = ?1", [id], |r| r.get(0))
-    }
-
-    /// `(id, "HH:MM")` de todas as tarefas vivas que têm hora.
-    pub fn due_times(&self) -> Result<Vec<(i64, String)>> {
-        let mut st = self
-            .conn
-            .prepare("SELECT id, due_time FROM tasks WHERE due_time IS NOT NULL AND deleted_at IS NULL")?;
-        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
     }
 
     /// Rearma o lembrete (ex.: depois de a data mudar).
@@ -73,15 +46,15 @@ impl Db {
     /// (e não passou de 24 h), ainda sem lembrete disparado.
     pub fn due_reminders(&self, now_local: NaiveDateTime) -> Result<Vec<Task>> {
         let mut st = self.conn.prepare(&format!(
-            "SELECT {TASK_COLS}, due_time FROM tasks
-             WHERE status = 'active' AND done = 0 AND deleted_at IS NULL
+            "SELECT {TASK_COLS} FROM tasks
+             WHERE status = 'active' AND done = 0 AND {LIVE}
                AND due_date IS NOT NULL AND due_time IS NOT NULL AND reminded_at IS NULL
              ORDER BY due_date, due_time, id"
         ))?;
-        let rows = st.query_map([], |r| Ok((row_to_task(r)?, r.get::<_, String>(7)?)))?;
+        let rows = st.query_map([], row_to_task)?;
         let mut out = Vec::new();
         for row in rows {
-            let (task, time) = row?;
+            let task = row?;
             let Some(date) = task
                 .due_date
                 .as_deref()
@@ -89,7 +62,10 @@ impl Db {
             else {
                 continue;
             };
-            let Ok(time) = NaiveTime::parse_from_str(&time, "%H:%M") else { continue };
+            let Some(time) = task.due_time.as_deref().and_then(|t| NaiveTime::parse_from_str(t, "%H:%M").ok())
+            else {
+                continue;
+            };
             let instante = date.and_time(time);
             if instante <= now_local && now_local - instante <= Duration::hours(MAX_ATRASO_H) {
                 out.push(task);
@@ -114,9 +90,9 @@ mod tests {
         assert!(db.set_due_time(id, Some("25:00")).is_err());
         assert!(db.set_due_time(id, Some("abc")).is_err());
         db.set_due_time(id, Some("9:05")).unwrap();
-        assert_eq!(db.due_time(id).unwrap().as_deref(), Some("09:05"));
+        assert_eq!(db.get_task(id).unwrap().due_time.as_deref(), Some("09:05"));
         db.set_due_time(id, Some(" ")).unwrap();
-        assert_eq!(db.due_time(id).unwrap(), None);
+        assert_eq!(db.get_task(id).unwrap().due_time, None);
     }
 
     #[test]
