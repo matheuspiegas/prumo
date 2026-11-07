@@ -93,6 +93,7 @@ export const api = {
   tags: () => invoke<TagCount[]>("list_tags"),
   setTags: (taskId: number, tags: string[]) => invoke<void>("set_task_tags", { taskId, tags }),
   listByTag: (name: string) => invoke<Task[]>("list_tasks_by_tag", { name }),
+  search: (query: string) => invoke<Task[]>("search_tasks", { query }),
   reorder: (ids: number[]) => invoke<void>("reorder_tasks", { ids }),
   overdue: () => invoke<Task[]>("list_overdue"),
   /** Sem `id`, reagenda todas as atrasadas para hoje. */
