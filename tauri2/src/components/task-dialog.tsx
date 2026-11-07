@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { DatePicker } from "@/components/date-picker";
+import { RecurrenceSelect } from "@/components/recurrence-select";
 import { api, baseName, formatSize, type Attachment, type Task } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +32,7 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [date, setDate] = useState<string | null>(null);
+  const [recurrence, setRecurrence] = useState<string | null>(null);
   const [saved, setSaved] = useState<Attachment[]>([]);
   const [pending, setPending] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -42,6 +44,7 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
     setTitle(task?.title ?? "");
     setNotes(task?.notes ?? "");
     setDate(task ? task.due : defaultDate);
+    setRecurrence(task?.recurrence ?? null);
     setPending([]);
     setSaved([]);
     if (task) loadAttachments(task.id).catch((e) => toast.error(String(e)));
@@ -101,8 +104,10 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
     try {
       if (task) {
         await api.update(task.id, t, notes, date);
+        if (recurrence !== (task.recurrence ?? null)) await api.setRecurrence(task.id, recurrence);
       } else {
         const id = await api.add(t, notes, date);
+        if (recurrence) await api.setRecurrence(id, recurrence);
         for (const p of pending) await api.attach(id, p);
       }
       onSaved();
@@ -142,6 +147,10 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
           <div className="flex flex-col gap-1.5">
             <Label>Data</Label>
             <DatePicker value={date} onChange={setDate} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Repetir</Label>
+            <RecurrenceSelect value={recurrence} onChange={setRecurrence} />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="notes">Notas</Label>

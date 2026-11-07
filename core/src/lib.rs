@@ -1,6 +1,8 @@
 use rusqlite::{params, Connection, Result};
 use std::path::{Path, PathBuf};
 
+pub mod recurrence;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Task {
     pub id: i64,
@@ -13,6 +15,8 @@ pub struct Task {
     pub source: String,
     /// `active` ou `inbox` (aguardando aprovação, criada por um agente).
     pub status: String,
+    /// Recorrência `<unidade>:<n>` (ver `recurrence`); `None` = não repete.
+    pub recurrence: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -57,10 +61,11 @@ fn row_to_task(r: &rusqlite::Row) -> Result<Task> {
         done: r.get::<_, i64>(4)? != 0,
         source: r.get(5)?,
         status: r.get(6)?,
+        recurrence: r.get(7)?,
     })
 }
 
-const TASK_COLS: &str = "id, title, notes, due_date, done, source, status";
+const TASK_COLS: &str = "id, title, notes, due_date, done, source, status, recurrence";
 
 impl Db {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
@@ -80,6 +85,7 @@ impl Db {
         conn.execute_batch(SCHEMA)?;
         let db = Self { conn };
         db.migrate()?;
+        db.ensure_recurrence_column()?;
         Ok(db)
     }
 
@@ -183,10 +189,14 @@ impl Db {
     }
 
     pub fn set_done(&self, id: i64, done: bool) -> Result<()> {
+        let was_done = self.conn.query_row("SELECT done FROM tasks WHERE id = ?1", [id], |r| r.get::<_, i64>(0))? != 0;
         self.conn.execute(
             "UPDATE tasks SET done = ?2, updated_at = datetime('now') WHERE id = ?1",
             params![id, done as i64],
         )?;
+        if done && !was_done {
+            self.spawn_next_occurrence(id)?; // recorrência: cria a próxima ocorrência
+        }
         Ok(())
     }
 

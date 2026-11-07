@@ -1,4 +1,5 @@
-import { Check, Sparkles, Trash2, X } from "lucide-react";
+import { Check, Repeat, Sparkles, Trash2, X } from "lucide-react";
+import { recurrenceLabel } from "@/components/recurrence-select";
 import { motion, Reorder } from "motion/react";
 import { useRef, useState, type Ref } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -92,6 +93,11 @@ export function TaskRow({
           <Sparkles className="size-3" />
           {task.source}
         </Badge>
+      )}
+      {task.recurrence && (
+        <Repeat className="size-3.5 shrink-0 text-muted-foreground" aria-label={recurrenceLabel(task.recurrence)}>
+          <title>{recurrenceLabel(task.recurrence)}</title>
+        </Repeat>
       )}
       {label && (
         <span className={cn("text-xs text-muted-foreground", overdue && "font-medium text-destructive")}>

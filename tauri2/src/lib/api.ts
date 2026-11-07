@@ -10,6 +10,8 @@ export type Task = {
   done: boolean;
   source: string;
   status: string;
+  /** `<unidade>:<n>` (day|week|month) ou null = não repete. */
+  recurrence: string | null;
 };
 export type Attachment = { id: number; filename: string; path: string; size: number };
 export type Counts = { today: number; tomorrow: number; inbox: number };
@@ -64,6 +66,7 @@ export const api = {
   update: (id: number, title: string, notes: string, date: string | null) =>
     invoke<void>("update_task", { id, title, notes, date }),
   setDone: (id: number, done: boolean) => invoke<void>("set_done", { id, done }),
+  setRecurrence: (id: number, recurrence: string | null) => invoke<void>("set_recurrence", { id, recurrence }),
   approve: (id: number) => invoke<void>("approve_task", { id }),
   remove: (id: number) => invoke<void>("delete_task", { id }),
   attachments: (taskId: number) => invoke<Attachment[]>("list_attachments", { taskId }),
