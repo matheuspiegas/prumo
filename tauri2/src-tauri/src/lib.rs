@@ -123,6 +123,12 @@ fn delete_task(db: State<AppDb>, id: i64) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn search_tasks(db: State<AppDb>, query: String) -> Result<Vec<TaskDto>, String> {
+    let tasks = lock(&db)?.search(&query).map_err(err)?;
+    Ok(tasks.into_iter().map(Into::into).collect())
+}
+
+#[tauri::command]
 fn reorder_tasks(db: State<AppDb>, ids: Vec<i64>) -> Result<(), String> {
     lock(&db)?.reorder(&ids).map_err(err)
 }
@@ -235,6 +241,7 @@ pub fn run() {
             approve_task,
             delete_task,
             reorder_tasks,
+            search_tasks,
             list_attachments,
             add_attachment,
             delete_attachment,

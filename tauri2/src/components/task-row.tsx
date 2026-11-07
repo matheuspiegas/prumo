@@ -4,6 +4,7 @@ import { useRef, useState, type Ref } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Highlight } from "@/components/highlight";
 import { dueLabel, type Task } from "@/lib/api";
 import { rowVariants } from "@/lib/motion";
 import { cn } from "@/lib/utils";
@@ -23,6 +24,8 @@ export function TaskRow({
   onApprove,
   onDragStart,
   onDragEnd,
+  selected,
+  highlight,
 }: {
   task: Task;
   /** Estado de conclusão exibido (pode ser otimista, diferente de task.done). */
@@ -41,6 +44,10 @@ export function TaskRow({
   onApprove: (el: HTMLElement | null) => void;
   onDragStart?: () => void;
   onDragEnd?: () => void;
+  /** Destaque de teclado (atalhos). */
+  selected?: boolean;
+  /** Termo da busca a destacar no título. */
+  highlight?: string;
 }) {
   const justDragged = useRef(false);
   const [dragging, setDragging] = useState(false);
@@ -51,9 +58,12 @@ export function TaskRow({
   const className = cn(
     "group relative flex cursor-pointer select-none items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-accent",
     dragging && "z-10 bg-background",
+    selected && "bg-accent ring-2 ring-ring/50",
   );
   const common = {
     ref,
+    "data-task-id": task.id,
+    "data-selected": selected ? "" : undefined,
     // Soltar um arrasto não deve abrir a tarefa.
     onClick: () => {
       if (!justDragged.current) onOpen();
@@ -77,7 +87,7 @@ export function TaskRow({
           animate={{ opacity: done ? 0.55 : 1 }}
           transition={{ duration: 0.3 }}
         >
-          {task.title}
+          {highlight ? <Highlight text={task.title} query={highlight} /> : task.title}
           <motion.span
             aria-hidden
             className="pointer-events-none absolute top-1/2 right-0 left-0 h-px origin-left bg-current"

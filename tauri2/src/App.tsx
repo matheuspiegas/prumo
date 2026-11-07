@@ -2,13 +2,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { animate, AnimatePresence, motion, Reorder, useReducedMotion } from "motion/react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Inbox, ListChecks, Plus } from "lucide-react";
+import { Inbox, ListChecks, Plus, SearchX } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import { AppSidebar } from "@/components/app-sidebar";
 import { TaskDialog } from "@/components/task-dialog";
 import { SettingsView } from "@/components/settings";
 import { TaskRow } from "@/components/task-row";
+import { SearchBox } from "@/components/search-box";
+import { ShortcutsHelp } from "@/components/shortcuts-help";
+import { useShortcuts } from "@/hooks/use-shortcuts";
 import { VoiceButton } from "@/components/voice-button";
 import { useVoice } from "@/hooks/use-voice";
 import { Button } from "@/components/ui/button";
@@ -37,6 +40,11 @@ export default function App() {
   const [quick, setQuick] = useState("");
   const [dialog, setDialog] = useState<DialogState>({ open: false, task: null });
   const [view, setView] = useState<"tasks" | "settings">("tasks");
+  const [query, setQuery] = useState("");
+  const [found, setFound] = useState<{ q: string; list: Task[] } | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
   const [shortcut, setShortcut] = useState("CommandOrControl+Shift+Space");
 
   // Filtro cuja lista está de fato exibida (muda só quando a nova lista chega).
@@ -147,7 +155,7 @@ export default function App() {
     timers.current.delete(t.id);
     updatePending((m) => m.set(t.id, done));
     // A linha deixa a lista quando a mudança a tira do filtro atual.
-    const leaves = filter === 3 ? !done : filter <= 2 && done;
+    const leaves = !query.trim() && filter === 3 ? !done : filter <= 2 && done;
     const p = api.setDone(t.id, done).catch((e) => {
       toast.error(String(e));
       const tm = timers.current.get(t.id);
@@ -235,6 +243,80 @@ export default function App() {
     run(api.add(t, "", defaultDate));
   };
 
+  // Busca: re-executa quando o termo ou a lista mudam (ex.: após concluir/excluir).
+  const q = query.trim();
+  const searching = q !== "";
+  useEffect(() => {
+    if (!q) {
+      setFound(null);
+      return;
+    }
+    let stale = false;
+    const t = setTimeout(() => {
+      api
+        .search(q)
+        .then((list) => !stale && setFound({ q, list }))
+        .catch((e) => toast.error(String(e)));
+    }, 120);
+    return () => {
+      stale = true;
+      clearTimeout(t);
+    };
+  }, [q, tasks]);
+
+  const shown = searching ? (found?.list ?? []) : tasks;
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+
+  // A seleção some ao trocar de filtro/busca ou se a tarefa deixou a lista.
+  useEffect(() => {
+    setSelectedId(null);
+  }, [filter, q, view]);
+  useEffect(() => {
+    if (selectedId !== null && !shown.some((t) => t.id === selectedId)) setSelectedId(null);
+  }, [shown, selectedId]);
+  useEffect(() => {
+    if (selectedId === null) return;
+    document.querySelector(`[data-task-id="${selectedId}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [selectedId]);
+
+  const selectedTask = () => shownRef.current.find((t) => t.id === selectedIdRef.current) ?? null;
+  useShortcuts({
+    enabled: view === "tasks",
+    onNew: () => (filter <= 2 || searching) && setDialog({ open: true, task: null }),
+    onFocusSearch: () => {
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    },
+    onMove: (d) => {
+      const list = shownRef.current;
+      if (!list.length) return;
+      const i = list.findIndex((t) => t.id === selectedIdRef.current);
+      const next = i < 0 ? (d > 0 ? 0 : list.length - 1) : Math.min(list.length - 1, Math.max(0, i + d));
+      setSelectedId(list[next].id);
+    },
+    onToggleSelected: () => {
+      const t = selectedTask();
+      if (t && filter !== 4) toggle(t, !(pending.get(t.id) ?? t.done));
+    },
+    onOpenSelected: () => {
+      const t = selectedTask();
+      if (t) setDialog({ open: true, task: t });
+    },
+    onDeleteSelected: () => {
+      const t = selectedTask();
+      if (!t) return;
+      const list = shownRef.current;
+      const i = list.findIndex((x) => x.id === t.id);
+      setSelectedId((list[i + 1] ?? list[i - 1])?.id ?? null);
+      run(api.remove(t.id));
+    },
+    onEscape: () => (searching ? setQuery("") : setSelectedId(null)),
+    onHelp: () => setHelpOpen(true),
+  });
+
   const subtitle =
     filter === 0 && today
       ? format(new Date(), "EEEE, d 'de' MMMM", { locale: ptBR })
@@ -266,6 +348,7 @@ export default function App() {
               {subtitle && <p className="mt-1 text-sm text-muted-foreground first-letter:uppercase">{subtitle}</p>}
             </div>
             <div className="flex items-center gap-2">
+              <SearchBox value={query} onChange={setQuery} inputRef={searchRef} />
               <VoiceButton state={voice.state} shortcut={shortcut} onToggle={voice.toggle} onCancel={voice.cancel} level={voice.level} />
               {filter <= 2 && (
                 <Button onClick={() => setDialog({ open: true, task: null })}>
@@ -285,24 +368,26 @@ export default function App() {
             />
           )}
 
-          {listFilter !== null && (
+          {listFilter !== null && !(searching && found?.list.length === 0) && (
             <ListContainer
-              key={listFilter}
-              reorderable={listFilter <= 2}
-              tasks={tasks}
+              key={searching ? "search" : listFilter}
+              reorderable={!searching && listFilter <= 2}
+              tasks={shown}
               setTasks={setTasks}
               firstPaint={firstPaint}
-              empty={tasks.length === 0}
+              empty={shown.length === 0}
             >
-              {tasks.map((t, i) => (
+              {shown.map((t, i) => (
                 <TaskRow
                   key={t.id}
                   task={t}
                   done={pending.get(t.id) ?? t.done}
                   today={today}
                   tomorrow={tomorrow}
-                  inbox={filter === 4}
-                  reorderable={listFilter <= 2}
+                  inbox={!searching && filter === 4}
+                  reorderable={!searching && listFilter <= 2}
+                  selected={t.id === selectedId}
+                  highlight={searching ? q : undefined}
                   delay={performance.now() < cascadeUntil.current ? Math.min(i, STAGGER_MAX) * STAGGER_STEP : 0}
                   onOpen={() => setDialog({ open: true, task: t })}
                   onToggle={(done) => toggle(t, done)}
@@ -316,7 +401,14 @@ export default function App() {
               ))}
             </ListContainer>
           )}
-          {listFilter !== null && tasks.length === 0 && (
+          {searching && found?.q === q && found.list.length === 0 && (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 pb-24 text-muted-foreground">
+              <SearchX className="size-10" />
+              <p className="text-sm">Nada encontrado para “{q}”.</p>
+              <p className="text-xs">Tente outras palavras. A busca olha título e notas.</p>
+            </div>
+          )}
+          {!searching && listFilter !== null && tasks.length === 0 && (
             <motion.div
               key={`empty-${listFilter}`}
               initial={{ opacity: 0, scale: 0.92 }}
@@ -339,6 +431,7 @@ export default function App() {
         onClose={() => setDialog((d) => ({ ...d, open: false }))}
         onSaved={refresh}
       />
+      <ShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
     </SidebarProvider>
   );
 }

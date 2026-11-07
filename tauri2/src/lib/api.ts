@@ -70,6 +70,7 @@ export const api = {
   attach: (taskId: number, path: string) => invoke<number>("add_attachment", { taskId, path }),
   detach: (id: number) => invoke<void>("delete_attachment", { id }),
   open: (path: string) => invoke<void>("open_attachment", { path }),
+  search: (query: string) => invoke<Task[]>("search_tasks", { query }),
   reorder: (ids: number[]) => invoke<void>("reorder_tasks", { ids }),
   quickAdd: (title: string, date: string | null) => invoke<number>("quick_add_task", { title, date }),
   openLogs: () => invoke<string>("open_logs"),

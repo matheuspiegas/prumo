@@ -24,6 +24,9 @@ pub struct Attachment {
     pub size: i64,
 }
 
+mod search;
+pub use search::normalize;
+
 pub struct Db {
     conn: Connection,
 }
