@@ -18,6 +18,8 @@ export type Task = {
   recurrence: string | null;
   parentId: number | null;
   deletedAt: string | null;
+  subtasksDone: number;
+  subtasksTotal: number;
 };
 export type Attachment = { id: number; filename: string; path: string; size: number };
 export type Counts = { today: number; tomorrow: number; inbox: number };
@@ -83,6 +85,10 @@ export const api = {
   /** Sem `id`, reagenda todas as atrasadas para hoje. */
   rescheduleToToday: (id?: number) => invoke<void>("reschedule_to_today", { id: id ?? null }),
   setPriority: (id: number, priority: number) => invoke<void>("set_priority", { id, priority }),
+  addSubtask: (parentId: number, title: string) => invoke<number>("add_subtask", { parentId, title }),
+  subtasks: (parentId: number) => invoke<Task[]>("list_subtasks", { parentId }),
+  renameSubtask: (id: number, title: string) => invoke<void>("rename_subtask", { id, title }),
+  reorderSubtasks: (parentId: number, ids: number[]) => invoke<void>("reorder_subtasks", { parentId, ids }),
   quickAdd: (title: string, date: string | null) => invoke<number>("quick_add_task", { title, date }),
   openLogs: () => invoke<string>("open_logs"),
   voiceStart: () => invoke<void>("voice_start"),

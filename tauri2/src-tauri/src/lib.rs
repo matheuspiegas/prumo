@@ -31,6 +31,9 @@ struct TaskDto {
     recurrence: Option<String>,
     parent_id: Option<i64>,
     deleted_at: Option<String>,
+    /// Progresso do checklist (preenchido em `list_tasks`).
+    subtasks_done: i64,
+    subtasks_total: i64,
 }
 
 #[derive(Serialize)]
@@ -63,6 +66,8 @@ impl From<Task> for TaskDto {
             recurrence: t.recurrence,
             parent_id: t.parent_id,
             deleted_at: t.deleted_at,
+            subtasks_done: 0,
+            subtasks_total: 0,
         }
     }
 }
@@ -87,7 +92,43 @@ fn list_tasks(db: State<AppDb>, filter: i32) -> Result<Vec<TaskDto>, String> {
         _ => db.inbox(),
     }
     .map_err(err)?;
-    Ok(tasks.into_iter().map(Into::into).collect())
+    let ids: Vec<i64> = tasks.iter().map(|t| t.id).collect();
+    let progress = db.subtask_progress(&ids).map_err(err)?;
+    Ok(tasks
+        .into_iter()
+        .map(|t| {
+            let (done, total) = progress.get(&t.id).copied().unwrap_or((0, 0));
+            let mut dto: TaskDto = t.into();
+            dto.subtasks_done = done;
+            dto.subtasks_total = total;
+            dto
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn add_subtask(db: State<AppDb>, parent_id: i64, title: String) -> Result<i64, String> {
+    lock(&db)?.add_subtask(parent_id, &title).map_err(err)
+}
+
+#[tauri::command]
+fn list_subtasks(db: State<AppDb>, parent_id: i64) -> Result<Vec<TaskDto>, String> {
+    Ok(lock(&db)?
+        .subtasks(parent_id)
+        .map_err(err)?
+        .into_iter()
+        .map(Into::into)
+        .collect())
+}
+
+#[tauri::command]
+fn rename_subtask(db: State<AppDb>, id: i64, title: String) -> Result<(), String> {
+    lock(&db)?.rename_subtask(id, &title).map_err(err)
+}
+
+#[tauri::command]
+fn reorder_subtasks(db: State<AppDb>, parent_id: i64, ids: Vec<i64>) -> Result<(), String> {
+    lock(&db)?.reorder_subtasks(parent_id, &ids).map_err(err)
 }
 
 #[tauri::command]
@@ -272,6 +313,10 @@ pub fn run() {
             list_overdue,
             reschedule_to_today,
             set_priority,
+            add_subtask,
+            list_subtasks,
+            rename_subtask,
+            reorder_subtasks,
             list_attachments,
             add_attachment,
             delete_attachment,

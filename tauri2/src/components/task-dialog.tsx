@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { DatePicker } from "@/components/date-picker";
 import { PrioritySelect } from "@/components/priority-select";
+import { SubtasksList } from "@/components/subtasks-list";
 import { api, baseName, formatSize, type Attachment, type Task } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -162,8 +163,9 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
               className="min-h-24"
             />
           </div>
+          {task && <SubtasksList parentId={task.id} onChanged={onSaved} />}
           <div className="flex flex-col gap-1.5">
-            <Label>Anexos {total > 0 && <span className="text-muted-foreground">({total})</span>}</Label>
+            <Label>Anexos{total > 0 && <span className="text-muted-foreground">({total})</span>}</Label>
             <div
               className={cn(
                 "flex flex-col gap-2 rounded-lg border border-dashed p-3 transition-colors",

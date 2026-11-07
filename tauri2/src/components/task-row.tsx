@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PriorityDot } from "@/components/priority-select";
+import { SubtaskProgress } from "@/components/subtasks-list";
 import { dueLabel, type Task } from "@/lib/api";
 import { rowVariants } from "@/lib/motion";
 import { cn } from "@/lib/utils";
@@ -92,6 +93,7 @@ export function TaskRow({
         </motion.span>
       </span>
       <PriorityDot priority={task.priority} />
+      <SubtaskProgress done={task.subtasksDone} total={task.subtasksTotal} />
       {task.source !== "manual" && (
         <Badge variant="secondary" className="gap-1 capitalize">
           <Sparkles className="size-3" />
