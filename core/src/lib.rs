@@ -1,6 +1,9 @@
 use rusqlite::{params, Connection, Result};
 use std::path::{Path, PathBuf};
 
+mod reminders;
+pub use reminders::parse_hhmm;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Task {
     pub id: i64,
@@ -80,6 +83,7 @@ impl Db {
         conn.execute_batch(SCHEMA)?;
         let db = Self { conn };
         db.migrate()?;
+        db.ensure_reminder_columns()?;
         Ok(db)
     }
 
@@ -192,7 +196,9 @@ impl Db {
 
     pub fn update_task(&self, id: i64, title: &str, notes: &str, due_date: Option<&str>) -> Result<()> {
         self.conn.execute(
-            "UPDATE tasks SET title = ?2, notes = ?3, due_date = ?4, updated_at = datetime('now') WHERE id = ?1",
+            "UPDATE tasks SET title = ?2, notes = ?3, due_date = ?4,
+             reminded_at = CASE WHEN due_date IS NOT ?4 THEN NULL ELSE reminded_at END,
+             updated_at = datetime('now') WHERE id = ?1",
             params![id, title, notes, due_date],
         )?;
         Ok(())

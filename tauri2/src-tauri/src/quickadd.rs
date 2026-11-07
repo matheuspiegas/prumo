@@ -27,11 +27,26 @@ pub fn add_quick(db: &Db, title: &str, date: Option<&str>, auto_approve: bool) -
 }
 
 #[tauri::command]
-pub fn quick_add_task(app: AppHandle, db: State<AppDb>, title: String, date: Option<String>) -> Result<i64, String> {
+pub fn quick_add_task(
+    app: AppHandle,
+    db: State<AppDb>,
+    title: String,
+    date: Option<String>,
+    time: Option<String>,
+) -> Result<i64, String> {
     let auto = crate::settings::load().auto_approve;
+    // Valida a hora antes de criar, para não deixar tarefa pela metade.
+    let time = time.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    if let Some(t) = &time {
+        tarefas_core::parse_hhmm(t).ok_or_else(|| format!("Hora inválida: {t}"))?;
+    }
     let id = {
         let db = db.0.lock().map_err(err)?;
-        add_quick(&db, &title, date.as_deref(), auto)?
+        let id = add_quick(&db, &title, date.as_deref(), auto)?;
+        if let Some(t) = &time {
+            db.set_due_time(id, Some(t)).map_err(err)?;
+        }
+        id
     };
     let _ = app.emit("tasks-changed", ());
     Ok(id)
