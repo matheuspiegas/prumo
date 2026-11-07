@@ -7,6 +7,7 @@ import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import { AppSidebar } from "@/components/app-sidebar";
 import { TaskDialog } from "@/components/task-dialog";
+import { ConfirmDelete } from "@/components/confirm-delete";
 import { OverdueSection } from "@/components/overdue-section";
 import { TrashView } from "@/components/trash-view";
 import { useUndo } from "@/hooks/use-undo";
@@ -199,6 +200,8 @@ export default function App() {
     else finish();
   };
 
+  // Exclusão sempre passa por confirmação; `then` roda ao confirmar (ex.: mover a seleção).
+  const [toDelete, setToDelete] = useState<{ task: Task; then?: () => void } | null>(null);
   const remove = (t: Task) =>
     run(api.remove(t.id).then(() => undo.push("Tarefa movida para a lixeira", () => api.restore(t.id))));
 
@@ -356,8 +359,8 @@ export default function App() {
       if (!t) return;
       const list = shownRef.current;
       const i = list.findIndex((x) => x.id === t.id);
-      setSelectedId((list[i + 1] ?? list[i - 1])?.id ?? null);
-      run(api.remove(t.id));
+      const next = (list[i + 1] ?? list[i - 1])?.id ?? null;
+      setToDelete({ task: t, then: () => setSelectedId(next) });
     },
     onEscape: () => (searching ? setQuery("") : setSelectedId(null)),
     onHelp: () => setHelpOpen(true),
@@ -474,7 +477,7 @@ export default function App() {
                   delay={0}
                   onOpen={() => setDialog({ open: true, task: t })}
                   onToggle={(done) => toggle(t, done)}
-                  onDelete={() => run(api.remove(t.id))}
+                  onDelete={() => setToDelete({ task: t })}
                   onApprove={() => {}}
                   extra={
                     <Button size="xs" variant="outline" onClick={() => run(api.rescheduleToToday(t.id))}>
@@ -509,7 +512,7 @@ export default function App() {
                   delay={performance.now() < cascadeUntil.current ? Math.min(i, STAGGER_MAX) * STAGGER_STEP : 0}
                   onOpen={() => setDialog({ open: true, task: t })}
                   onToggle={(done) => toggle(t, done)}
-                  onDelete={() => remove(t)}
+                  onDelete={() => setToDelete({ task: t })}
                   onApprove={(el) => approve(t, el)}
                   onDragStart={() => {
                     draggingRef.current = true;
@@ -547,6 +550,17 @@ export default function App() {
         defaultTags={activeTag ? [activeTag] : undefined}
         onClose={() => setDialog((d) => ({ ...d, open: false }))}
         onSaved={refresh}
+      />
+      <ConfirmDelete
+        task={toDelete?.task ?? null}
+        onCancel={() => setToDelete(null)}
+        onConfirm={() => {
+          const d = toDelete;
+          setToDelete(null);
+          if (!d) return;
+          d.then?.();
+          remove(d.task);
+        }}
       />
       <ShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
     </SidebarProvider>

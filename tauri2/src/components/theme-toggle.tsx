@@ -1,5 +1,5 @@
 import { Monitor, Moon, Sun } from "lucide-react";
-import { useTheme } from "next-themes";
+import { centerOf, useThemeTransition } from "@/hooks/use-theme-transition";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -8,7 +8,7 @@ const LABEL = { system: "Tema: sistema", light: "Tema: claro", dark: "Tema: escu
 const ICON = { system: Monitor, light: Sun, dark: Moon };
 
 export function ThemeToggle() {
-  const { theme = "system", setTheme } = useTheme();
+  const { theme, change } = useThemeTransition();
   const current = (ORDER as readonly string[]).includes(theme) ? (theme as (typeof ORDER)[number]) : "system";
   const Icon = ICON[current];
   const next = ORDER[(ORDER.indexOf(current) + 1) % ORDER.length];
@@ -16,7 +16,7 @@ export function ThemeToggle() {
     <Tooltip>
       <TooltipTrigger
         render={
-          <Button variant="ghost" size="icon" onClick={() => setTheme(next)} aria-label={LABEL[current]} />
+          <Button variant="ghost" size="icon" onClick={(e) => change(next, centerOf(e.currentTarget))} aria-label={LABEL[current]} />
         }
       >
         <Icon />

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useTheme } from "next-themes";
+import { centerOf, useThemeTransition } from "@/hooks/use-theme-transition";
 import { AlertCircle, CheckCircle2, FlaskConical, FolderOpen, Loader2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
@@ -62,7 +62,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 }
 
 export function SettingsView() {
-  const { theme = "system", setTheme } = useTheme();
+  const { theme, change: changeTheme } = useThemeTransition();
   const [saved, setSaved] = useState<Settings | null>(null);
   const [form, setForm] = useState<Settings | null>(null);
   const [discovery, setDiscovery] = useState<Discovery | null>(null);
@@ -362,7 +362,7 @@ export function SettingsView() {
                     type="button"
                     aria-pressed={active}
                     whileTap={{ scale: 0.95 }}
-                    onClick={() => setTheme(t.value)}
+                    onClick={(e) => changeTheme(t.value, centerOf(e.currentTarget))}
                     className={`relative rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${active ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
                   >
                     {active && (
