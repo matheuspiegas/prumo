@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { DatePicker } from "@/components/date-picker";
 import { PrioritySelect } from "@/components/priority-select";
 import { SubtasksList } from "@/components/subtasks-list";
+import { RecurrenceSelect } from "@/components/recurrence-select";
 import { api, baseName, formatSize, type Attachment, type Task } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -34,6 +35,7 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
   const [notes, setNotes] = useState("");
   const [date, setDate] = useState<string | null>(null);
   const [priority, setPriority] = useState(0);
+  const [recurrence, setRecurrence] = useState<string | null>(null);
   const [saved, setSaved] = useState<Attachment[]>([]);
   const [pending, setPending] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -46,6 +48,7 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
     setNotes(task?.notes ?? "");
     setDate(task ? task.due : defaultDate);
     setPriority(task?.priority ?? 0);
+    setRecurrence(task?.recurrence ?? null);
     setPending([]);
     setSaved([]);
     if (task) loadAttachments(task.id).catch((e) => toast.error(String(e)));
@@ -106,9 +109,11 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
       if (task) {
         await api.update(task.id, t, notes, date);
         if (priority !== task.priority) await api.setPriority(task.id, priority);
+        if (recurrence !== (task.recurrence ?? null)) await api.setRecurrence(task.id, recurrence);
       } else {
         const id = await api.add(t, notes, date);
         if (priority) await api.setPriority(id, priority);
+        if (recurrence) await api.setRecurrence(id, recurrence);
         for (const p of pending) await api.attach(id, p);
       }
       onSaved();
@@ -152,6 +157,10 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
           <div className="flex flex-col gap-1.5">
             <Label>Prioridade</Label>
             <PrioritySelect value={priority} onChange={setPriority} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Repetir</Label>
+            <RecurrenceSelect value={recurrence} onChange={setRecurrence} />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="notes">Notas</Label>

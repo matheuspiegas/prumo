@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 // Cada assunto vive no seu arquivo, com seu próprio `impl Db { ... }`.
 // Assim agentes diferentes não conflitam ao editar.
 mod overdue; // atrasadas, reagendar e prioridade
-mod recurrence; // recorrência de tarefas
+pub mod recurrence; // recorrência de tarefas
 mod reminders; // lembretes com hora (due_time / reminded_at)
 mod search; // busca
 mod subtasks; // subtarefas (parent_id)
@@ -271,10 +271,14 @@ impl Db {
     }
 
     pub fn set_done(&self, id: i64, done: bool) -> Result<()> {
+        let was_done = self.conn.query_row("SELECT done FROM tasks WHERE id = ?1", [id], |r| r.get::<_, i64>(0))? != 0;
         self.conn.execute(
             "UPDATE tasks SET done = ?2, updated_at = datetime('now') WHERE id = ?1",
             params![id, done as i64],
         )?;
+        if done && !was_done {
+            self.spawn_next_occurrence(id)?; // recorrência: cria a próxima ocorrência
+        }
         Ok(())
     }
 

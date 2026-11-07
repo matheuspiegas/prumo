@@ -160,8 +160,23 @@ fn update_task(
 }
 
 #[tauri::command]
-fn set_done(db: State<AppDb>, id: i64, done: bool) -> Result<(), String> {
-    lock(&db)?.set_done(id, done).map_err(err)
+fn set_done(app: AppHandle, db: State<AppDb>, id: i64, done: bool) -> Result<(), String> {
+    let spawned = {
+        let db = lock(&db)?;
+        // Concluir uma tarefa recorrente pendente gera a próxima ocorrência.
+        let repeats = done && db.get_recurrence(id).map_err(err)?.is_some() && !db.get_task(id).map_err(err)?.done;
+        db.set_done(id, done).map_err(err)?;
+        repeats
+    };
+    if spawned {
+        let _ = app.emit("tasks-changed", ());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn set_recurrence(db: State<AppDb>, id: i64, recurrence: Option<String>) -> Result<(), String> {
+    lock(&db)?.set_recurrence(id, recurrence.as_deref()).map_err(err)
 }
 
 #[tauri::command]
@@ -344,6 +359,7 @@ pub fn run() {
             add_task,
             update_task,
             set_done,
+            set_recurrence,
             approve_task,
             delete_task,
             list_trash,

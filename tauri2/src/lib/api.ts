@@ -76,6 +76,7 @@ export const api = {
   update: (id: number, title: string, notes: string, date: string | null) =>
     invoke<void>("update_task", { id, title, notes, date }),
   setDone: (id: number, done: boolean) => invoke<void>("set_done", { id, done }),
+  setRecurrence: (id: number, recurrence: string | null) => invoke<void>("set_recurrence", { id, recurrence }),
   approve: (id: number) => invoke<void>("approve_task", { id }),
   remove: (id: number) => invoke<void>("delete_task", { id }),
   listTrash: () => invoke<TrashItem[]>("list_trash"),
