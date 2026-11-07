@@ -13,6 +13,7 @@ import { TrashView } from "@/components/trash-view";
 import { useUndo } from "@/hooks/use-undo";
 import { SettingsView } from "@/components/settings";
 import { TaskRow } from "@/components/task-row";
+import { WeekView } from "@/components/week/week-view";
 import { SearchBox } from "@/components/search-box";
 import { Collapse, SwapText } from "@/components/animated-title";
 import { EmptyState } from "@/components/empty-state";
@@ -50,7 +51,9 @@ export default function App() {
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [tagList, setTagList] = useState<TagCount[]>([]);
   const activeTagRef = useRef<string | null>(null);
-  const [view, setView] = useState<"tasks" | "settings" | "trash">("tasks");
+  const [view, setView] = useState<"tasks" | "settings" | "trash" | "week">("tasks");
+  // Incrementa a cada refresh: a visão Semana recarrega junto (tasks-changed, foco, diálogo salvo).
+  const [weekTick, setWeekTick] = useState(0);
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<{ q: string; list: Task[] } | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -96,6 +99,7 @@ export default function App() {
   }, []);
 
   const refresh = useCallback(async () => {
+    setWeekTick((n) => n + 1);
     try {
       const [list, c, d, od, tg] = await Promise.all([
         activeTag ? api.listByTag(activeTag) : api.list(filter),
@@ -387,8 +391,10 @@ export default function App() {
             setActiveTag(name);
             setFilter(2);
           }
-          setView("tasks");
+          setView((v) => (v === "week" ? "week" : "tasks")); // na Semana, a tag só filtra os cartões
         }}
+        weekActive={view === "week"}
+        onWeek={() => setView("week")}
         onFilter={(f) => {
           setActiveTag(null);
           setFilter(f);
@@ -414,6 +420,16 @@ export default function App() {
           <SettingsView />
         ) : view === "trash" ? (
           <TrashView onChanged={refresh} />
+        ) : view === "week" ? (
+          <WeekView
+            today={today}
+            tomorrow={tomorrow}
+            refreshKey={weekTick}
+            activeTag={activeTag}
+            onClearTag={() => setActiveTag(null)}
+            onOpenTask={(t) => setDialog({ open: true, task: t })}
+            pushUndo={undo.push}
+          />
         ) : (
         <div className="mx-auto flex h-full w-full max-w-2xl flex-col gap-5 px-8 pt-8">
           <header className="flex items-end justify-between gap-4">

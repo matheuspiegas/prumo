@@ -67,6 +67,10 @@ export type VoiceResult = {
 
 export type TrashItem = { task: Task; daysAgo: number; daysLeft: number };
 
+/** Visão Semana: atrasadas + um item por dia + sem data (ver docs/plano-semana.md). */
+export type DayData = { date: string; tasks: Task[] };
+export type WeekData = { overdue: Task[]; days: DayData[]; undated: Task[] };
+
 /** 0 Hoje, 1 Amanhã, 2 Todas, 3 Concluídas, 4 Caixa de entrada */
 export type Filter = 0 | 1 | 2 | 3 | 4;
 
@@ -74,6 +78,10 @@ export const api = {
   list: (filter: Filter) => invoke<Task[]>("list_tasks", { filter }),
   counts: () => invoke<Counts>("counts"),
   dates: () => invoke<[string, string]>("dates"),
+  /** `from` = YYYY-MM-DD do primeiro dia; `days` = quantos dias (7). */
+  week: (from: string, days: number) => invoke<WeekData>("list_week", { from, days }),
+  /** `date` null = sem data; `index` = posição entre as pendentes da coluna destino (sem a própria tarefa). */
+  moveTask: (id: number, date: string | null, index: number) => invoke<void>("move_task", { id, date, index }),
   add: (title: string, notes: string, date: string | null) =>
     invoke<number>("add_task", { title, notes, date }),
   update: (id: number, title: string, notes: string, date: string | null) =>

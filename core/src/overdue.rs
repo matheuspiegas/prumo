@@ -34,7 +34,8 @@ impl Db {
     /// Muda só a data de vencimento (`None` remove).
     pub fn set_due_date(&self, id: i64, date: Option<&str>) -> Result<()> {
         self.conn.execute(
-            "UPDATE tasks SET due_date = ?2, updated_at = datetime('now') WHERE id = ?1",
+            "UPDATE tasks SET reminded_at = CASE WHEN due_date IS NOT ?2 THEN NULL ELSE reminded_at END,
+                              due_date = ?2, updated_at = datetime('now') WHERE id = ?1",
             params![id, date],
         )?;
         Ok(())
@@ -44,7 +45,7 @@ impl Db {
     pub fn reschedule_overdue(&self, today: &str) -> Result<usize> {
         self.conn.execute(
             &format!(
-                "UPDATE tasks SET due_date = ?1, updated_at = datetime('now')
+                "UPDATE tasks SET due_date = ?1, reminded_at = NULL, updated_at = datetime('now')
                  WHERE status = 'active' AND {LIVE} AND done = 0 AND due_date IS NOT NULL AND due_date < ?1"
             ),
             [today],
@@ -106,5 +107,26 @@ mod tests {
         // prioridade não muda a ordem manual
         let t: Vec<_> = db.tasks_on("2026-11-07").unwrap().into_iter().map(|t| t.title).collect();
         assert_eq!(t, ["a", "b"]);
+    }
+
+    #[test]
+    fn rescheduling_rearms_the_reminder() {
+        let db = Db::open_in_memory().unwrap();
+        let a = db.add_task("a", "", Some("2026-11-01")).unwrap();
+        let b = db.add_task("b", "", Some("2026-11-02")).unwrap();
+        for id in [a, b] {
+            db.set_due_time(id, Some("09:00")).unwrap();
+            db.mark_reminded(id).unwrap();
+        }
+        let reminded = |id: i64| -> Option<String> {
+            db.conn.query_row("SELECT reminded_at FROM tasks WHERE id = ?1", [id], |r| r.get(0)).unwrap()
+        };
+        db.set_due_date(a, Some("2026-11-01")).unwrap(); // mesma data: mantém
+        assert!(reminded(a).is_some());
+        db.set_due_date(a, Some("2026-11-07")).unwrap();
+        assert!(reminded(a).is_none());
+        assert!(reminded(b).is_some());
+        db.reschedule_overdue("2026-11-07").unwrap();
+        assert!(reminded(b).is_none());
     }
 }

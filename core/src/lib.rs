@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 // Cada assunto vive no seu arquivo, com seu próprio `impl Db { ... }`.
 // Assim agentes diferentes não conflitam ao editar.
 mod overdue; // atrasadas, reagendar e prioridade
+mod planner; // visão Semana (week, move_task)
+pub use planner::WeekRaw;
 pub mod recurrence; // recorrência de tarefas
 mod reminders; // lembretes com hora (due_time / reminded_at)
 pub use reminders::parse_hhmm;

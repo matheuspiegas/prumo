@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { DUR_BASE, DUR_FAST, easeOut, spring } from "@/lib/motion";
 import { AnimatedCount } from "@/components/animated-count";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { CalendarDays, CheckCheck, Hash, Inbox, ListTodo, Settings as SettingsIcon, Trash2, Sunrise, Sun } from "lucide-react";
+import { CalendarDays, CalendarRange, CheckCheck, Hash, Inbox, ListTodo, Settings as SettingsIcon, Trash2, Sunrise, Sun } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -135,10 +135,14 @@ export function AppSidebar({
   onSettings,
   trashActive = false,
   onTrash,
+  weekActive = false,
+  onWeek,
   tags = [],
   activeTag = null,
   onTag,
 }: {
+  weekActive?: boolean;
+  onWeek?: () => void;
   filter: Filter;
   onFilter: (f: Filter) => void;
   counts: Counts;
@@ -155,7 +159,7 @@ export function AppSidebar({
   const targetOf = (f: Filter) => (f === 0 ? "today" : f === 1 ? "tomorrow" : f === 2 ? "all" : null);
   const badge = (f: Filter) => (f === 0 ? counts.today : f === 1 ? counts.tomorrow : 0);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const activeKey = settingsActive ? "settings" : trashActive ? "trash" : activeTag ? `tag:${activeTag.toLowerCase()}` : `f${filter}`;
+  const activeKey = settingsActive ? "settings" : trashActive ? "trash" : weekActive ? "week" : activeTag ? `tag:${activeTag.toLowerCase()}` : `f${filter}`;
   return (
     <Sidebar collapsible="none" className="border-r">
       <div ref={wrapRef} className="relative flex min-h-0 flex-1 flex-col">
@@ -171,7 +175,7 @@ export function AppSidebar({
             <SidebarGroupContent>
               <SidebarMenu>
                 <MItem variants={itemVariants} custom={0} initial="hidden" animate="show">
-                  <NavButton active={!settingsActive && !trashActive && !activeTag && filter === 4} onClick={() => onFilter(4)}>
+                  <NavButton active={!settingsActive && !trashActive && !weekActive && !activeTag && filter === 4} onClick={() => onFilter(4)}>
                     <Inbox />
                     <span>Caixa de entrada</span>
                   </NavButton>
@@ -199,7 +203,7 @@ export function AppSidebar({
                         transition={{ duration: 0.6 }}
                       />
                     )}
-                    <NavButton active={!settingsActive && !trashActive && !activeTag && filter === f} onClick={() => onFilter(f)}>
+                    <NavButton active={!settingsActive && !trashActive && !weekActive && !activeTag && filter === f} onClick={() => onFilter(f)}>
                       <Icon />
                       <span>{label}</span>
                     </NavButton>
@@ -210,6 +214,14 @@ export function AppSidebar({
                     )}
                   </MItem>
                 ))}
+                {onWeek && (
+                  <MItem variants={itemVariants} custom={ITEMS.length + 1} initial="hidden" animate="show">
+                    <NavButton active={weekActive && !settingsActive && !trashActive} onClick={onWeek}>
+                      <CalendarRange />
+                      <span>Semana</span>
+                    </NavButton>
+                  </MItem>
+                )}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -224,7 +236,7 @@ export function AppSidebar({
                         {tags.map((t) => (
                           <MItem key={t.name.toLowerCase()} variants={collapseVariants} initial="hidden" animate="show" exit="exit" className="overflow-hidden">
                             <NavButton
-                              active={!settingsActive && activeTag?.toLowerCase() === t.name.toLowerCase()}
+                              active={!settingsActive && !weekActive && activeTag?.toLowerCase() === t.name.toLowerCase()}
                               onClick={() => onTag?.(t.name)}
                             >
                               <Hash />

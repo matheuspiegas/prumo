@@ -114,6 +114,54 @@ fn list_tasks(db: State<AppDb>, filter: i32) -> Result<Vec<TaskDto>, String> {
     with_tags(&db, tasks)
 }
 
+#[derive(Serialize)]
+struct DayDto {
+    date: String,
+    tasks: Vec<TaskDto>,
+}
+
+#[derive(Serialize)]
+struct WeekDto {
+    overdue: Vec<TaskDto>,
+    days: Vec<DayDto>,
+    undated: Vec<TaskDto>,
+}
+
+/// Visão Semana: atrasadas, `days` dias a partir de `from` (YYYY-MM-DD) e tarefas sem data.
+#[tauri::command]
+fn list_week(db: State<AppDb>, from: String, days: i64) -> Result<WeekDto, String> {
+    let db = lock(&db)?;
+    let raw = db.week(&from, days, &today()).map_err(err)?;
+    // Uma só chamada de `with_tags` para a união; depois redistribui nos grupos.
+    let (n_over, n_undated) = (raw.overdue.len(), raw.undated.len());
+    let lens: Vec<usize> = raw.days.iter().map(|(_, t)| t.len()).collect();
+    let dates: Vec<String> = raw.days.iter().map(|(d, _)| d.clone()).collect();
+    let all: Vec<Task> = raw
+        .overdue
+        .into_iter()
+        .chain(raw.days.into_iter().flat_map(|(_, t)| t))
+        .chain(raw.undated)
+        .collect();
+    let mut it = with_tags(&db, all)?.into_iter();
+    let overdue = it.by_ref().take(n_over).collect();
+    let days = dates
+        .into_iter()
+        .zip(lens)
+        .map(|(date, n)| DayDto { date, tasks: it.by_ref().take(n).collect() })
+        .collect();
+    let undated = it.by_ref().take(n_undated).collect();
+    Ok(WeekDto { overdue, days, undated })
+}
+
+/// Move a tarefa para `date` (None = sem data) na posição `index` entre as pendentes da coluna.
+#[tauri::command]
+fn move_task(app: AppHandle, db: State<AppDb>, id: i64, date: Option<String>, index: i64) -> Result<(), String> {
+    let date = date.filter(|d| !d.is_empty());
+    lock(&db)?.move_task(id, date.as_deref(), index).map_err(err)?;
+    let _ = app.emit("tasks-changed", ());
+    Ok(())
+}
+
 #[tauri::command]
 fn add_subtask(db: State<AppDb>, parent_id: i64, title: String) -> Result<i64, String> {
     lock(&db)?.add_subtask(parent_id, &title).map_err(err)
@@ -371,6 +419,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_tasks,
+            list_week,
+            move_task,
             counts,
             add_task,
             update_task,
