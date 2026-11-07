@@ -1,5 +1,5 @@
 import { Children, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { animate, AnimatePresence, motion, Reorder, useReducedMotion } from "motion/react";
+import { animate, AnimatePresence, motion, Reorder, useAnimationControls, useReducedMotion } from "motion/react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Inbox, ListChecks, Plus, SearchX, X } from "lucide-react";
@@ -13,6 +13,8 @@ import { useUndo } from "@/hooks/use-undo";
 import { SettingsView } from "@/components/settings";
 import { TaskRow } from "@/components/task-row";
 import { SearchBox } from "@/components/search-box";
+import { Collapse, SwapText } from "@/components/animated-title";
+import { EmptyState } from "@/components/empty-state";
 import { ShortcutsHelp } from "@/components/shortcuts-help";
 import { useShortcuts } from "@/hooks/use-shortcuts";
 import { VoiceButton } from "@/components/voice-button";
@@ -22,7 +24,7 @@ import { Input } from "@/components/ui/input";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 import { api, type Counts, type Filter, type Task, type TagCount } from "@/lib/api";
-import { DONE_EXIT_DELAY, listVariants, STAGGER_MAX, STAGGER_STEP } from "@/lib/motion";
+import { DONE_EXIT_DELAY, DUR_BASE, DUR_FAST, easeOut, listVariants, STAGGER_MAX, STAGGER_STEP } from "@/lib/motion";
 
 const TITLES = ["Hoje", "Amanhã", "Todas as tarefas", "Concluídas", "Caixa de entrada"];
 const EMPTY = [
@@ -72,6 +74,9 @@ export default function App() {
   const [hold, setHold] = useState<{ key: "today" | "tomorrow"; value: number } | null>(null);
   const [bump, setBump] = useState<{ target: "today" | "tomorrow" | "all"; n: number } | null>(null);
   const bumpN = useRef(0);
+  const quickControls = useAnimationControls();
+  const hadFound = useRef(false);
+  const lastSubtitle = useRef<string | null>(null);
 
   filterRef.current = filter;
   activeTagRef.current = activeTag;
@@ -272,6 +277,7 @@ export default function App() {
     const t = quick.trim();
     if (!t) return;
     setQuick("");
+    if (!reduce) quickControls.start({ scale: [1, 1.015, 1], transition: { duration: 0.28, ease: easeOut } });
     // Com um filtro de tag ativo, a tarefa nova já nasce com a tag (senão sumiria da tela).
     run(api.add(t, "", defaultDate).then((id) => (activeTag ? api.setTags(id, [activeTag]) : undefined)));
   };
@@ -281,6 +287,7 @@ export default function App() {
   const searching = q !== "";
   useEffect(() => {
     if (!q) {
+      hadFound.current = false;
       setFound(null);
       return;
     }
@@ -288,7 +295,13 @@ export default function App() {
     const t = setTimeout(() => {
       api
         .search(q)
-        .then((list) => !stale && setFound({ q, list }))
+        .then((list) => {
+          if (stale) return;
+          // Primeira leva de resultados da busca entra em cascata curta.
+          if (!hadFound.current) cascadeUntil.current = performance.now() + 500;
+          hadFound.current = true;
+          setFound({ q, list });
+        })
         .catch((e) => toast.error(String(e)));
     }, 120);
     return () => {
@@ -356,6 +369,7 @@ export default function App() {
       : filter === 4
         ? "Tarefas criadas por agentes de IA. Aprove para movê-las para sua lista."
         : null;
+  if (subtitle) lastSubtitle.current = subtitle;
 
   return (
     <SidebarProvider className="h-screen">
@@ -385,6 +399,14 @@ export default function App() {
         onTrash={() => setView("trash")}
       />
       <SidebarInset className="overflow-hidden">
+        <AnimatePresence mode="wait">
+        <motion.div
+          key={view}
+          className="h-full"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0, transition: { duration: DUR_BASE, ease: easeOut } }}
+          exit={{ opacity: 0, y: -4, transition: { duration: DUR_FAST } }}
+        >
         {view === "settings" ? (
           <SettingsView />
         ) : view === "trash" ? (
@@ -393,37 +415,48 @@ export default function App() {
         <div className="mx-auto flex h-full w-full max-w-2xl flex-col gap-5 px-8 pt-8">
           <header className="flex items-end justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight">{activeTag ? `#${activeTag}` : TITLES[filter]}</h1>
-              {subtitle && <p className="mt-1 text-sm text-muted-foreground first-letter:uppercase">{subtitle}</p>}
-              {activeTag && (
-                <button
+              <SwapText id={activeTag ? `#${activeTag}` : filter} className="text-2xl font-semibold tracking-tight">
+                {activeTag ? `#${activeTag}` : TITLES[filter]}
+              </SwapText>
+              <Collapse show={!!subtitle}>
+                <SwapText id={subtitle ?? lastSubtitle.current ?? ""} as="p" className="mt-1 text-sm text-muted-foreground first-letter:uppercase">
+                  {subtitle ?? lastSubtitle.current}
+                </SwapText>
+              </Collapse>
+              <Collapse show={!!activeTag}>
+                <motion.button
                   type="button"
+                  whileTap={{ scale: 0.96 }}
                   onClick={() => setActiveTag(null)}
                   className="mt-1 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted"
                 >
                   Filtrando por #{activeTag} <X className="size-3" />
-                </button>
-              )}
+                </motion.button>
+              </Collapse>
             </div>
             <div className="flex items-center gap-2">
               <SearchBox value={query} onChange={setQuery} inputRef={searchRef} />
               <VoiceButton state={voice.state} shortcut={shortcut} onToggle={voice.toggle} onCancel={voice.cancel} level={voice.level} />
               {filter <= 2 && (
-                <Button onClick={() => setDialog({ open: true, task: null })}>
-                  <Plus data-icon="inline-start" /> Nova
-                </Button>
+                <motion.div whileTap={{ scale: 0.95 }} whileHover={{ scale: 1.03 }} transition={{ duration: DUR_FAST }}>
+                  <Button onClick={() => setDialog({ open: true, task: null })}>
+                    <Plus data-icon="inline-start" /> Nova
+                  </Button>
+                </motion.div>
               )}
             </div>
           </header>
 
           {filter <= 2 && (
-            <Input
-              value={quick}
-              onChange={(e) => setQuick(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && quickAdd()}
-              placeholder="Adicionar tarefa e pressionar Enter…"
-              className="h-10"
-            />
+            <motion.div animate={quickControls}>
+              <Input
+                value={quick}
+                onChange={(e) => setQuick(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && quickAdd()}
+                placeholder="Adicionar tarefa e pressionar Enter…"
+                className="h-10 transition-shadow focus-visible:shadow-md"
+              />
+            </motion.div>
           )}
 
           {listFilter === 0 && !searching && (
@@ -487,26 +520,24 @@ export default function App() {
             </ListContainer>
           )}
           {searching && found?.q === q && found.list.length === 0 && (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 pb-24 text-muted-foreground">
-              <SearchX className="size-10" />
-              <p className="text-sm">Nada encontrado para “{q}”.</p>
-              <p className="text-xs">Tente outras palavras. A busca olha título e notas.</p>
-            </div>
+            <EmptyState
+              key="busca-vazia"
+              icon={SearchX}
+              title={`Nada encontrado para “${q}”.`}
+              hint="Tente outras palavras. A busca olha título e notas."
+            />
           )}
           {!searching && listFilter !== null && tasks.length === 0 && (
-            <motion.div
+            <EmptyState
               key={`empty-${listFilter}`}
-              initial={{ opacity: 0, scale: 0.92 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ type: "spring", stiffness: 300, damping: 28, delay: 0.2 }}
-              className="flex flex-1 flex-col items-center justify-center gap-3 pb-24 text-muted-foreground"
-            >
-              {listFilter === 4 ? <Inbox className="size-10" /> : <ListChecks className="size-10" />}
-              <p className="text-sm">{EMPTY[listFilter]}</p>
-            </motion.div>
+              icon={listFilter === 4 ? Inbox : ListChecks}
+              title={EMPTY[listFilter]}
+            />
           )}
         </div>
         )}
+        </motion.div>
+        </AnimatePresence>
       </SidebarInset>
 
       <TaskDialog

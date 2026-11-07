@@ -1,5 +1,8 @@
+import { motion } from "motion/react";
 import { Flag } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { spring } from "@/lib/motion";
+import { useId } from "react";
 
 /** 0 nenhuma, 1 baixa, 2 média, 3 alta. */
 export const PRIORITIES = [
@@ -23,6 +26,7 @@ export function PriorityDot({ priority }: { priority: number }) {
 
 /** Seletor segmentado (radiogroup) de prioridade. */
 export function PrioritySelect({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const id = useId(); // layoutId único por instância
   return (
     <div role="radiogroup" aria-label="Prioridade" className="flex gap-1">
       {PRIORITIES.map((p) => {
@@ -36,12 +40,20 @@ export function PrioritySelect({ value, onChange }: { value: number; onChange: (
             title={`Prioridade: ${p.label.toLowerCase()}`}
             onClick={() => onChange(p.value)}
             className={cn(
-              "flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-sm transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-              active ? "border-primary bg-accent font-medium" : "border-input text-muted-foreground",
+              "relative flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-sm transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+              active ? "border-transparent font-medium" : "border-input text-muted-foreground",
             )}
           >
-            {p.value > 0 && <Flag className={cn("size-3.5 fill-current", p.color)} aria-hidden />}
-            {p.label}
+            {active && (
+              <motion.span
+                layoutId={`prio-${id}`}
+                transition={spring}
+                className="absolute inset-0 rounded-md border border-primary bg-accent"
+                aria-hidden
+              />
+            )}
+            {p.value > 0 && <Flag className={cn("relative size-3.5 fill-current", p.color)} aria-hidden />}
+            <span className="relative">{p.label}</span>
           </button>
         );
       })}

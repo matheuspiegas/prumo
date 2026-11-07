@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -7,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, type Task } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { DUR_BASE, DUR_FAST, easeOut } from "@/lib/motion";
 
 /** Mini barra de progresso "2/5" usada na linha da tarefa. */
 export function SubtaskProgress({ done, total }: { done: number; total: number }) {
@@ -71,8 +73,16 @@ export function SubtasksList({ parentId, onChanged }: { parentId: number; onChan
         Subtarefas {items.length > 0 && <span className="text-muted-foreground">({done}/{items.length})</span>}
       </Label>
       <div className="flex flex-col gap-1">
+        <AnimatePresence initial={false}>
         {items.map((s) => (
-          <div key={s.id} className="group flex items-center gap-2 text-sm">
+          <motion.div
+            key={s.id}
+            layout="position"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto", transition: { duration: DUR_BASE, ease: easeOut } }}
+            exit={{ opacity: 0, height: 0, transition: { duration: DUR_FAST } }}
+            className="group flex items-center gap-2 overflow-hidden py-0.5 text-sm"
+          >
             <Checkbox
               checked={s.done}
               onCheckedChange={(c) => run(api.setDone(s.id, c === true))}
@@ -99,7 +109,7 @@ export function SubtasksList({ parentId, onChanged }: { parentId: number; onChan
             ) : (
               <button
                 type="button"
-                className={cn("min-w-0 flex-1 truncate text-left", s.done && "text-muted-foreground line-through")}
+                className={cn("min-w-0 flex-1 truncate text-left transition-colors duration-200", s.done && "text-muted-foreground line-through")}
                 onClick={() => setEditing({ id: s.id, text: s.title })}
               >
                 {s.title}
@@ -115,8 +125,9 @@ export function SubtasksList({ parentId, onChanged }: { parentId: number; onChan
             >
               <X />
             </Button>
-          </div>
+          </motion.div>
         ))}
+        </AnimatePresence>
         <div className="flex items-center gap-2">
           <Plus className="size-4 shrink-0 text-muted-foreground" />
           <Input

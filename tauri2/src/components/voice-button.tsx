@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AnimatePresence, motion, type MotionValue } from "motion/react";
+import { AnimatePresence, motion, useMotionValue, useTransform, type MotionValue } from "motion/react";
 import { Mic, Sparkles, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -58,6 +58,24 @@ function Content({ state, level }: { state: VoiceState; level?: MotionValue<numb
   );
 }
 
+/** Anel atrás do botão que respira e se expande com o nível do microfone (só transform/opacity). */
+function RecordingRing({ level }: { level?: MotionValue<number> }) {
+  const fallback = useMotionValue(0);
+  const l = level ?? fallback;
+  const scale = useTransform(l, (v) => 1 + Math.min(1, Math.sqrt(Math.max(0, v)) * 1.5) * 0.14);
+  return (
+    <motion.span
+      aria-hidden
+      className="pointer-events-none absolute -inset-1 rounded-[10px] ring-2 ring-destructive/40"
+      style={{ scale }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: [0.9, 0.35, 0.9] }}
+      exit={{ opacity: 0, transition: { duration: 0.15 } }}
+      transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+    />
+  );
+}
+
 export function VoiceButton({
   state,
   shortcut,
@@ -90,6 +108,7 @@ export function VoiceButton({
             />
           }
         >
+          <AnimatePresence initial={false}>{recording && <RecordingRing key="ring" level={level} />}</AnimatePresence>
           <AnimatePresence mode="popLayout" initial={false}>
             <motion.span
               key={state}

@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { X } from "lucide-react";
 import { TagChip } from "@/components/tag-chip";
 import { api } from "@/lib/api";
+import { popIn } from "@/lib/motion";
 
 const clean = (s: string) => s.trim().replace(/^#+/, "").trim();
 
@@ -28,8 +30,10 @@ export function TagInput({ value, onChange }: { value: string[]; onChange: (tags
   return (
     <div className="relative">
       <div className="flex min-h-9 flex-wrap items-center gap-1.5 rounded-lg border border-input px-2 py-1.5 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
+        <AnimatePresence initial={false}>
         {value.map((t) => (
-          <TagChip key={t} name={t}>
+          <motion.span key={t} layout variants={popIn} initial="hidden" animate="show" exit="exit" className="inline-flex">
+          <TagChip name={t}>
             <button
               type="button"
               aria-label={`Remover ${t}`}
@@ -39,7 +43,9 @@ export function TagInput({ value, onChange }: { value: string[]; onChange: (tags
               <X className="size-3" />
             </button>
           </TagChip>
+          </motion.span>
         ))}
+        </AnimatePresence>
         <input
           value={text}
           onChange={(e) => {

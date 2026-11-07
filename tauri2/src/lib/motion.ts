@@ -21,3 +21,30 @@ export const rowVariants: Variants = {
 
 /** Atraso (ms) entre a marcação de concluída e a saída da linha. */
 export const DONE_EXIT_DELAY = 600;
+
+/* ---- Linguagem de movimento do app (compartilhada) ----
+   Curto e discreto: entradas 150-250 ms, molas firmes, nada que atrase o uso. */
+
+/** Curva padrão de entrada (desacelera no fim). */
+export const easeOut = [0.22, 1, 0.36, 1] as const;
+
+/** Duração (s) de transições curtas de interface. */
+export const DUR_FAST = 0.15;
+export const DUR_BASE = 0.22;
+
+/** Entra subindo levemente com fade; sai com fade rápido. */
+export const fadeUp: Variants = {
+  hidden: { opacity: 0, y: 8 },
+  show: { opacity: 1, y: 0, transition: { duration: DUR_BASE, ease: easeOut } },
+  exit: { opacity: 0, y: -4, transition: { duration: DUR_FAST } },
+};
+
+/** Entra "estourando" (chips, badges, ícones). */
+export const popIn: Variants = {
+  hidden: { opacity: 0, scale: 0.6 },
+  show: { opacity: 1, scale: 1, transition: bouncy },
+  exit: { opacity: 0, scale: 0.6, transition: { duration: DUR_FAST } },
+};
+
+/** Micro-interação de botões/itens clicáveis. */
+export const press = { whileTap: { scale: 0.96 } } as const;

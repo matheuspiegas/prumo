@@ -1,5 +1,7 @@
+import { motion } from "motion/react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { isMac } from "@/hooks/use-shortcuts";
+import { DUR_BASE, easeOut } from "@/lib/motion";
 
 const MOD = isMac ? "⌘" : "Ctrl";
 
@@ -31,9 +33,18 @@ export function ShortcutsHelp({ open, onClose }: { open: boolean; onClose: () =>
         <DialogHeader>
           <DialogTitle>Atalhos de teclado</DialogTitle>
         </DialogHeader>
-        <div className="flex flex-col gap-5">
+        <motion.div
+          className="flex flex-col gap-5"
+          initial="hidden"
+          animate="show"
+          variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05, delayChildren: 0.04 } } }}
+        >
           {GROUPS.map((g) => (
-            <section key={g.title} className="flex flex-col gap-2">
+            <motion.section
+              key={g.title}
+              variants={{ hidden: { opacity: 0, y: 6 }, show: { opacity: 1, y: 0, transition: { duration: DUR_BASE, ease: easeOut } } }}
+              className="flex flex-col gap-2"
+            >
               <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{g.title}</h3>
               {g.items.map(([keys, label]) => (
                 <div key={label} className="flex items-center justify-between gap-4 text-sm">
@@ -47,9 +58,9 @@ export function ShortcutsHelp({ open, onClose }: { open: boolean; onClose: () =>
                   </span>
                 </div>
               ))}
-            </section>
+            </motion.section>
           ))}
-        </div>
+        </motion.div>
       </DialogContent>
     </Dialog>
   );

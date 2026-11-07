@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 
 /** Matiz estável (0-359) derivado do nome, sem diferenciar maiúsculas. */
@@ -29,8 +30,11 @@ export function TagChip({
   const cls = cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs leading-none whitespace-nowrap", className);
   if (onClick) {
     return (
-      <button
+      <motion.button
         type="button"
+        whileHover={{ scale: 1.06 }}
+        whileTap={{ scale: 0.92 }}
+        transition={{ type: "spring", stiffness: 500, damping: 30 }}
         style={tagStyle(name)}
         className={cn(cls, "cursor-pointer transition-opacity hover:opacity-70")}
         title={`Filtrar por #${name}`}
@@ -41,7 +45,7 @@ export function TagChip({
       >
         #{name}
         {children}
-      </button>
+      </motion.button>
     );
   }
   return (

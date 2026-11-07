@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 import { AlertCircle, CheckCircle2, FlaskConical, FolderOpen, Loader2 } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { DUR_BASE, DUR_FAST, easeOut, fadeUp, softSpring } from "@/lib/motion";
 import {
   acceleratorFromEvent,
   api,
@@ -39,13 +41,13 @@ const CUSTOM = "__custom__";
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
-    <section className="flex flex-col gap-4 rounded-xl border p-5">
+    <motion.section variants={fadeUp} className="flex flex-col gap-4 rounded-xl border p-5">
       <div>
         <h2 className="font-medium">{title}</h2>
         {hint && <p className="mt-0.5 text-sm text-muted-foreground">{hint}</p>}
       </div>
       {children}
-    </section>
+    </motion.section>
   );
 }
 
@@ -130,7 +132,12 @@ export function SettingsView() {
         <h1 className="mx-auto w-full max-w-2xl text-2xl font-semibold tracking-tight">Configurações</h1>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
+        <motion.div
+          className="mx-auto flex w-full max-w-2xl flex-col gap-5"
+          initial="hidden"
+          animate="show"
+          variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05, delayChildren: 0.05 } } }}
+        >
           <Section title="Voz" hint="Grave, transcreva localmente e crie a tarefa. O áudio não sai do seu computador.">
             <Field
               label="Modelo de transcrição"
@@ -306,12 +313,30 @@ export function SettingsView() {
               {!test && !testing && (
                 <p className="text-xs text-muted-foreground">Usa a frase “ligar para o João amanhã de manhã”.</p>
               )}
-              {test?.ok && (
-                <p className="text-sm text-muted-foreground">
-                  {test.r.title} · {test.r.date ?? "sem data"} · {(test.r.ms / 1000).toFixed(1)} s
-                </p>
-              )}
-              {test && !test.ok && <p className="text-sm text-destructive">{test.e}</p>}
+              <AnimatePresence mode="wait" initial={false}>
+                {test?.ok && (
+                  <motion.p
+                    key="ok"
+                    className="text-sm text-muted-foreground"
+                    initial={{ opacity: 0, x: -6 }}
+                    animate={{ opacity: 1, x: 0, transition: { duration: DUR_BASE, ease: easeOut } }}
+                    exit={{ opacity: 0, transition: { duration: DUR_FAST } }}
+                  >
+                    {test.r.title} · {test.r.date ?? "sem data"} · {(test.r.ms / 1000).toFixed(1)} s
+                  </motion.p>
+                )}
+                {test && !test.ok && (
+                  <motion.p
+                    key="erro"
+                    className="text-sm text-destructive"
+                    initial={{ opacity: 0, x: -6 }}
+                    animate={{ opacity: 1, x: 0, transition: { duration: DUR_BASE, ease: easeOut } }}
+                    exit={{ opacity: 0, transition: { duration: DUR_FAST } }}
+                  >
+                    {test.e}
+                  </motion.p>
+                )}
+              </AnimatePresence>
             </div>
           </Section>
 
@@ -328,15 +353,28 @@ export function SettingsView() {
           </Section>
 
           <Section title="Aparência">
-            <div className="flex gap-2">
-              {THEMES.map((t) => (
-                <Button key={t.value} variant={theme === t.value ? "default" : "outline"} onClick={() => setTheme(t.value)}>
-                  {t.label}
-                </Button>
-              ))}
+            <div role="group" aria-label="Tema" className="inline-flex gap-1 self-start rounded-lg border bg-muted/50 p-1">
+              {THEMES.map((t) => {
+                const active = theme === t.value;
+                return (
+                  <motion.button
+                    key={t.value}
+                    type="button"
+                    aria-pressed={active}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setTheme(t.value)}
+                    className={`relative rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${active ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {active && (
+                      <motion.span layoutId="tema-ativo" transition={softSpring} className="absolute inset-0 rounded-md bg-primary" />
+                    )}
+                    <span className="relative">{t.label}</span>
+                  </motion.button>
+                );
+              })}
             </div>
           </Section>
-        </div>
+        </motion.div>
       </div>
       <footer className="border-t bg-background px-8 py-3">
         <div className="mx-auto flex w-full max-w-2xl justify-end gap-2">

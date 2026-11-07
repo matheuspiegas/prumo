@@ -1,5 +1,7 @@
+import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
+import { DUR_BASE, DUR_FAST, easeOut } from "@/lib/motion";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const NONE = "none";
@@ -67,8 +69,15 @@ export function RecurrenceSelect({
           ))}
         </SelectContent>
       </Select>
+      <AnimatePresence initial={false}>
       {custom && (
-        <>
+        <motion.div
+          key="custom"
+          initial={{ opacity: 0, x: -8 }}
+          animate={{ opacity: 1, x: 0, transition: { duration: DUR_BASE, ease: easeOut } }}
+          exit={{ opacity: 0, x: -8, transition: { duration: DUR_FAST } }}
+          className="flex flex-wrap items-center gap-2"
+        >
           <span className="text-sm text-muted-foreground">a cada</span>
           <Input
             type="number"
@@ -97,8 +106,9 @@ export function RecurrenceSelect({
               ))}
             </SelectContent>
           </Select>
-        </>
+        </motion.div>
       )}
+      </AnimatePresence>
     </div>
   );
 }

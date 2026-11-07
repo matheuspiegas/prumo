@@ -1,6 +1,6 @@
 import { Check, Repeat, Sparkles, Trash2, X } from "lucide-react";
 import { recurrenceLabel } from "@/components/recurrence-select";
-import { motion, Reorder } from "motion/react";
+import { AnimatePresence, motion, Reorder } from "motion/react";
 import { useRef, useState, type Ref } from "react";
 import { TagChip } from "@/components/tag-chip";
 import { Badge } from "@/components/ui/badge";
@@ -10,8 +10,15 @@ import { PriorityDot } from "@/components/priority-select";
 import { SubtaskProgress } from "@/components/subtasks-list";
 import { Highlight } from "@/components/highlight";
 import { dueLabel, type Task } from "@/lib/api";
-import { rowVariants } from "@/lib/motion";
+import { bouncy, rowVariants } from "@/lib/motion";
 import { cn } from "@/lib/utils";
+
+/** Indicadores que surgem/somem com um "pop" discreto (objetos explícitos: não herdam as variants da linha). */
+const pop = {
+  initial: { opacity: 0, scale: 0.6 },
+  animate: { opacity: 1, scale: 1, transition: bouncy },
+  exit: { opacity: 0, scale: 0.6, transition: { duration: 0.12 } },
+};
 
 export function TaskRow({
   task,
@@ -66,7 +73,7 @@ export function TaskRow({
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
 
   const className = cn(
-    "group relative flex cursor-pointer select-none items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-accent",
+    "group relative flex cursor-pointer select-none items-center gap-3 rounded-lg px-3 py-2.5 transition-[background-color,box-shadow] duration-150 hover:bg-accent",
     dragging && "z-10 bg-background",
     selected && "bg-accent ring-2 ring-ring/50",
   );
@@ -87,9 +94,9 @@ export function TaskRow({
   const content = (
     <>
       {!inbox && (
-        <span onClick={stop}>
+        <motion.span onClick={stop} className="flex" whileTap={{ scale: 0.85 }} transition={bouncy}>
           <Checkbox checked={done} onCheckedChange={(c) => onToggle(c === true)} aria-label="Concluir" />
-        </span>
+        </motion.span>
       )}
       <span className="min-w-0 flex-1 text-sm">
         <motion.span
@@ -107,19 +114,33 @@ export function TaskRow({
           />
         </motion.span>
       </span>
-      <PriorityDot priority={task.priority} />
-      <SubtaskProgress done={task.subtasksDone} total={task.subtasksTotal} />
-      {task.source !== "manual" && (
-        <Badge variant="secondary" className="gap-1 capitalize">
-          <Sparkles className="size-3" />
-          {task.source}
-        </Badge>
-      )}
-      {task.recurrence && (
-        <Repeat className="size-3.5 shrink-0 text-muted-foreground" aria-label={recurrenceLabel(task.recurrence)}>
-          <title>{recurrenceLabel(task.recurrence)}</title>
-        </Repeat>
-      )}
+      <AnimatePresence initial={false}>
+        {task.priority > 0 && (
+          <motion.span key="prio" className="flex" {...pop}>
+            <PriorityDot priority={task.priority} />
+          </motion.span>
+        )}
+        {task.subtasksTotal > 0 && (
+          <motion.span key="sub" className="flex" {...pop}>
+            <SubtaskProgress done={task.subtasksDone} total={task.subtasksTotal} />
+          </motion.span>
+        )}
+        {task.source !== "manual" && (
+          <motion.span key="src" className="flex" {...pop}>
+            <Badge variant="secondary" className="gap-1 capitalize">
+              <Sparkles className="size-3" />
+              {task.source}
+            </Badge>
+          </motion.span>
+        )}
+        {task.recurrence && (
+          <motion.span key="rec" className="flex" {...pop}>
+            <Repeat className="size-3.5 shrink-0 text-muted-foreground" aria-label={recurrenceLabel(task.recurrence)}>
+              <title>{recurrenceLabel(task.recurrence)}</title>
+            </Repeat>
+          </motion.span>
+        )}
+      </AnimatePresence>
       {task.tags?.length > 0 && (
         <span className="flex shrink-0 items-center gap-1">
           {task.tags.slice(0, 3).map((t) => (
@@ -129,36 +150,51 @@ export function TaskRow({
         </span>
       )}
       {label && (
-        <span className={cn("text-xs text-muted-foreground", overdue && "font-medium text-destructive")}>
+        <span className={cn("text-xs text-muted-foreground transition-colors duration-300", overdue && "font-medium text-destructive")}>
           {label}
         </span>
       )}
-      {task.dueTime && (
-        <span className={cn("text-xs tabular-nums text-muted-foreground", overdue && "text-destructive")}>
-          {task.dueTime}
-        </span>
-      )}
+      <AnimatePresence initial={false}>
+        {task.dueTime && (
+          <motion.span
+            key="time"
+            {...pop}
+            className={cn(
+              "text-xs tabular-nums text-muted-foreground transition-colors duration-300",
+              overdue && "text-destructive",
+            )}
+          >
+            {task.dueTime}
+          </motion.span>
+        )}
+      </AnimatePresence>
       <span className="flex items-center gap-1" onClick={stop}>
         {extra}
         {inbox ? (
           <>
-            <Button size="sm" variant="outline" onClick={(e) => onApprove(e.currentTarget.closest("li"))}>
-              <Check data-icon="inline-start" /> Aprovar
-            </Button>
-            <Button size="icon-sm" variant="ghost" onClick={onDelete} aria-label="Descartar">
-              <X />
-            </Button>
+            <motion.span className="flex" whileTap={{ scale: 0.95 }} transition={bouncy}>
+              <Button size="sm" variant="outline" onClick={(e) => onApprove(e.currentTarget.closest("li"))}>
+                <Check data-icon="inline-start" /> Aprovar
+              </Button>
+            </motion.span>
+            <motion.span className="flex" whileTap={{ scale: 0.9 }} transition={bouncy}>
+              <Button size="icon-sm" variant="ghost" onClick={onDelete} aria-label="Descartar">
+                <X />
+              </Button>
+            </motion.span>
           </>
         ) : (
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            className="opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-            onClick={onDelete}
-            aria-label="Excluir"
-          >
-            <Trash2 />
-          </Button>
+          <motion.span className="flex" whileTap={{ scale: 0.9 }} transition={bouncy}>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              className="translate-x-1 opacity-0 transition-[opacity,transform] duration-150 group-hover:translate-x-0 group-hover:opacity-100 focus-visible:translate-x-0 focus-visible:opacity-100"
+              onClick={onDelete}
+              aria-label="Excluir"
+            >
+              <Trash2 />
+            </Button>
+          </motion.span>
         )}
       </span>
     </>
