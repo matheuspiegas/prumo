@@ -13,7 +13,7 @@ import {
   prettyShortcut,
   type ClaudeStatus,
   type ClaudeTest,
-  type ModelInfo,
+  type Discovery,
   type Settings,
 } from "@/lib/api";
 
@@ -63,7 +63,7 @@ export function SettingsView() {
   const { theme = "system", setTheme } = useTheme();
   const [saved, setSaved] = useState<Settings | null>(null);
   const [form, setForm] = useState<Settings | null>(null);
-  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [discovery, setDiscovery] = useState<Discovery | null>(null);
   const [claude, setClaude] = useState<ClaudeStatus | null>(null);
   const [testing, setTesting] = useState(false);
   const [test, setTest] = useState<{ ok: true; r: ClaudeTest } | { ok: false; e: string } | null>(null);
@@ -80,7 +80,7 @@ export function SettingsView() {
         detect(s.claudePath);
       })
       .catch((e) => toast.error(String(e)));
-    api.models().then(setModels).catch(() => {});
+    api.models().then(setDiscovery).catch(() => {});
   }, [detect]);
 
   if (!form || !saved) return null;
@@ -111,11 +111,14 @@ export function SettingsView() {
     }
   };
 
+  const models = discovery?.models ?? [];
+  const unsupported = models.filter((m) => !m.supported);
   const modelItems = [
-    { value: AUTO, label: "Automático (recomendado)" },
+    { value: AUTO, label: "Automático (recomendado)", disabled: false },
     ...models.map((m) => ({
       value: m.path,
-      label: `${m.id} — ${m.sizeMb} MB · ${m.source === "handy" ? "Handy" : "Prumo"}${m.selectedInHandy ? " (em uso no Handy)" : ""}`,
+      label: `${m.id} · ${m.sizeMb} MB${m.selectedInHandy ? " · em uso no Handy" : ""}${m.supported ? "" : " · indisponível"}`,
+      disabled: !m.supported,
     })),
   ];
   const customModel = !MODELS.some((m) => m.value === form.claudeModel);
@@ -131,9 +134,11 @@ export function SettingsView() {
             <Field
               label="Modelo de transcrição"
               hint={
-                models.length
-                  ? "Modelos encontrados no Handy são usados somente para leitura."
-                  : "Nenhum modelo encontrado. Instale o Handy e baixe um modelo (Parakeet)."
+                !discovery
+                  ? "Procurando modelos…"
+                  : models.length === 0
+                    ? "Nenhum modelo encontrado. Instale o Handy e baixe um modelo. Veja abaixo onde procurei."
+                    : "Modelos do Handy são usados somente para leitura."
               }
             >
               <Select
@@ -146,12 +151,37 @@ export function SettingsView() {
                 </SelectTrigger>
                 <SelectContent>
                   {modelItems.map((i) => (
-                    <SelectItem key={i.value} value={i.value}>
+                    <SelectItem key={i.value} value={i.value} disabled={i.disabled}>
                       {i.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {unsupported.length > 0 && (
+                <p className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+                  <AlertCircle className="mt-px size-3.5 shrink-0" />
+                  <span>
+                    {unsupported.length} modelo{unsupported.length > 1 ? "s" : ""} do Handy não funciona
+                    {unsupported.length > 1 ? "m" : ""} neste build do Prumo: {unsupported[0].reason}.
+                  </span>
+                </p>
+              )}
+              {discovery && (
+                <details className="text-xs text-muted-foreground">
+                  <summary className="cursor-pointer select-none">Onde procurei modelos</summary>
+                  <ul className="mt-1.5 flex flex-col gap-1">
+                    {discovery.searched.map((s) => (
+                      <li key={s.path} className="flex items-start gap-1.5 break-all">
+                        <span className={s.exists ? "text-green-600" : "text-destructive"}>{s.exists ? "✓" : "✗"}</span>
+                        <span>
+                          {s.path}
+                          {!s.exists && " (não existe)"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
             </Field>
             <Field label="Atalho global" hint="Clique e pressione a combinação (com Ctrl, ⌘, Alt ou Shift). Vale mesmo com o app em segundo plano.">
               <Input

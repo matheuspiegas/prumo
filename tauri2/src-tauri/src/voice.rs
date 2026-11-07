@@ -1,7 +1,7 @@
 //! Comandos de voz: gravar → transcrever (local) → interpretar (claude -p) → tarefa.
 use crate::interpret::{self, Parsed};
 use crate::settings::{self, Settings};
-use crate::stt::{self, ModelInfo};
+use crate::stt::{self, Discovery};
 use crate::{AppDb, audio};
 use serde::Serialize;
 use std::{sync::Mutex, time::Instant};
@@ -34,12 +34,12 @@ struct Outcome {
 }
 
 #[tauri::command]
-pub fn voice_start(voice: State<VoiceState>) -> Result<(), String> {
+pub fn voice_start(app: AppHandle, voice: State<VoiceState>) -> Result<(), String> {
     let mut slot = voice.0.lock().map_err(err)?;
     if slot.is_some() {
         return Err("Já existe uma gravação em andamento".into());
     }
-    *slot = Some(audio::start()?);
+    *slot = Some(audio::start(app)?);
     Ok(())
 }
 
@@ -56,8 +56,13 @@ fn process(app: &AppHandle, rec: audio::Recording, s: &Settings) -> Result<Outco
     if samples.len() < (audio::TARGET_RATE as usize * 4 / 10) {
         return Err("Gravação muito curta".into());
     }
-    let model = stt::resolve(s.stt_model_dir.as_deref())
-        .ok_or("Nenhum modelo de transcrição encontrado. Instale o Handy ou escolha um modelo em Configurações.")?;
+    let model = stt::resolve(s.stt_model_dir.as_deref()).ok_or_else(|| {
+        if stt::discover().models.iter().any(|m| !m.supported) {
+            "Encontrei modelos do Handy, mas este build do Prumo não consegue usá-los (falta o motor ggml). Veja Configurações > Voz.".to_string()
+        } else {
+            "Nenhum modelo de transcrição encontrado. Instale o Handy ou escolha um modelo em Configurações.".to_string()
+        }
+    })?;
 
     let _ = app.emit("voice-status", "transcribing");
     let transcript = stt::transcribe(&model, &samples)?;
@@ -129,7 +134,7 @@ pub fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, Str
 }
 
 #[tauri::command]
-pub async fn discover_models() -> Result<Vec<ModelInfo>, String> {
+pub async fn discover_models() -> Result<Discovery, String> {
     tauri::async_runtime::spawn_blocking(stt::discover).await.map_err(err)
 }
 

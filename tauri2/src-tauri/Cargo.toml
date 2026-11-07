@@ -17,6 +17,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+# Motor ggml (Whisper .bin e .gguf), o mesmo do Handy. Exige CMake e um compilador C++, por
+# isso fica DESLIGADO por padrão. O build do Windows no GitHub Actions o liga (--features ggml).
+ggml = ["dep:transcribe-cpp"]
+
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
@@ -27,6 +32,7 @@ tauri-plugin-dialog = "2.8.4"
 # ATENÇÃO: o Cargo.lock fixa ort = 2.0.0-rc.12. O transcribe-rs 0.3.12 não compila com ort rc.15+
 # (rode `cargo update -p ort --precise 2.0.0-rc.12` se o lock for regenerado).
 transcribe-rs = { version = "0.3.12", features = ["onnx"] }
+transcribe-cpp = { version = "0.4.1", optional = true, default-features = false }
 cpal = "0.18.2"
 chrono = "0.4.45"
 tauri-plugin-global-shortcut = "2.4.1"

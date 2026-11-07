@@ -40,4 +40,7 @@ jobs:
       - uses: tauri-apps/tauri-action@v1
         with:
           projectPath: tauri2
+          # Liga o motor ggml (Whisper .bin e .gguf, como no Handy). Compila C++ com CMake,
+          # que já vem na imagem windows-latest.
+          args: --features ggml
           uploadWorkflowArtifacts: true

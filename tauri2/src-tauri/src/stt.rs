@@ -1,40 +1,108 @@
 //! Transcrição local reaproveitando modelos já instalados (Handy).
 //! Os arquivos do Handy são só lidos, nunca modificados.
+//!
+//! Dois motores:
+//! - **Parakeet ONNX** (pasta; formato antigo do Handy), via `transcribe-rs`. Sempre disponível.
+//! - **ggml** (arquivos `.bin` do Whisper e `.gguf`; formato atual do Handy), via `transcribe-cpp`.
+//!   Só existe quando o app é compilado com a feature `ggml` (exige CMake).
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use tarefas_core::data_dir;
 use transcribe_rs::onnx::Quantization;
 use transcribe_rs::onnx::parakeet::{ParakeetModel, ParakeetParams};
 
+/// Este build inclui o motor ggml (Whisper `.bin` e `.gguf`)?
+pub const GGML_ENABLED: bool = cfg!(feature = "ggml");
+
+const GGML_MISSING: &str = "Este build do Prumo não inclui o motor ggml (Whisper/GGUF)";
+
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelInfo {
     pub id: String,
+    /// Pasta (Parakeet ONNX) ou arquivo (`.bin`/`.gguf`).
     pub path: String,
+    /// "parakeet-onnx" ou "ggml"
     pub engine: String,
     pub size_mb: u64,
-    /// "handy" ou "prumo"
+    /// "handy", "handy-hf" (cache do HuggingFace usado pelo Handy) ou "prumo"
     pub source: String,
     /// É o modelo selecionado no Handy.
     pub selected_in_handy: bool,
+    /// Este build consegue usar o modelo?
+    pub supported: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct Searched {
+    pub path: String,
+    pub exists: bool,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Discovery {
+    pub models: Vec<ModelInfo>,
+    /// Onde procuramos (ajuda a diagnosticar quando a lista vem vazia).
+    pub searched: Vec<Searched>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Engine {
+    ParakeetOnnx,
+    Ggml,
+}
+
+impl Engine {
+    fn id(self) -> &'static str {
+        match self {
+            Engine::ParakeetOnnx => "parakeet-onnx",
+            Engine::Ggml => "ggml",
+        }
+    }
+    fn supported(self) -> bool {
+        match self {
+            Engine::ParakeetOnnx => true,
+            Engine::Ggml => GGML_ENABLED,
+        }
+    }
 }
 
 fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from)
 }
 
-/// Pasta de dados do Handy (identificador `com.pais.handy`).
-pub fn handy_dir() -> Option<PathBuf> {
+/// Pastas de dados do Handy (identificador `com.pais.handy`). No Windows o Tauri usa
+/// `%APPDATA%` (Roaming) para dados do app, mas também olhamos `%LOCALAPPDATA%` por garantia.
+pub fn handy_dirs() -> Vec<PathBuf> {
     if let Some(d) = std::env::var_os("PRUMO_HANDY_DIR") {
-        return Some(PathBuf::from(d));
+        return vec![PathBuf::from(d)];
     }
+    let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
     if cfg!(target_os = "macos") {
-        home().map(|h| h.join("Library/Application Support/com.pais.handy"))
+        home().map(|h| h.join("Library/Application Support/com.pais.handy")).into_iter().collect()
     } else if cfg!(target_os = "windows") {
-        std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("com.pais.handy"))
+        [env("APPDATA"), env("LOCALAPPDATA")]
+            .into_iter()
+            .flatten()
+            .map(|d| d.join("com.pais.handy"))
+            .collect()
     } else {
-        home().map(|h| h.join(".local/share/com.pais.handy"))
+        home().map(|h| h.join(".local/share/com.pais.handy")).into_iter().collect()
     }
+}
+
+/// Cache do HuggingFace, onde o Handy guarda os modelos `.gguf` do catálogo.
+pub fn hf_cache_roots() -> Vec<PathBuf> {
+    let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
+    if let Some(d) = env("HF_HUB_CACHE") {
+        return vec![d];
+    }
+    if let Some(d) = env("HF_HOME") {
+        return vec![d.join("hub")];
+    }
+    home().map(|h| h.join(".cache/huggingface/hub")).into_iter().collect()
 }
 
 /// `selected_model` do Handy (aceita a chave na raiz ou dentro de `settings`).
@@ -80,62 +148,218 @@ fn quantization_if_parakeet(dir: &Path) -> Option<Quantization> {
     }
 }
 
-fn scan(root: &Path, source: &str, selected: Option<&str>, out: &mut Vec<ModelInfo>) {
+fn ggml_extension(p: &Path) -> bool {
+    p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("bin") || e.eq_ignore_ascii_case("gguf"))
+}
+
+/// Descobre o motor pelo que está no caminho (pasta Parakeet ou arquivo `.bin`/`.gguf`).
+fn classify(p: &Path) -> Option<Engine> {
+    if p.is_dir() && quantization_if_parakeet(p).is_some() {
+        Some(Engine::ParakeetOnnx)
+    } else if p.is_file() && ggml_extension(p) {
+        Some(Engine::Ggml)
+    } else {
+        None
+    }
+}
+
+/// Ids que o Handy usa para os modelos Whisper `.bin` do catálogo antigo.
+fn handy_id_for_bin(filename: &str) -> Option<&'static str> {
+    match filename {
+        "ggml-small.bin" => Some("small"),
+        "whisper-medium-q4_1.bin" => Some("medium"),
+        "ggml-large-v3-turbo.bin" => Some("turbo"),
+        "ggml-large-v3-q5_0.bin" => Some("large"),
+        "breeze-asr-q5_k.bin" => Some("breeze-asr"),
+        _ => None,
+    }
+}
+
+/// O `selected_model` do Handy aponta para este modelo? (comparação tolerante: o formato do
+/// id varia entre o catálogo antigo e o novo)
+fn is_selected(selected: Option<&str>, candidates: &[&str]) -> bool {
+    let Some(sel) = selected.map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()) else {
+        return false;
+    };
+    candidates.iter().any(|c| {
+        let c = c.to_lowercase();
+        c == sel || c == format!("{sel}-gguf") || c.starts_with(&format!("{sel}-"))
+    })
+}
+
+fn push(out: &mut Vec<ModelInfo>, id: String, path: &Path, engine: Engine, size_mb: u64, source: &str, selected: bool) {
+    out.push(ModelInfo {
+        id,
+        path: path.to_string_lossy().into_owned(),
+        engine: engine.id().into(),
+        size_mb,
+        source: source.into(),
+        selected_in_handy: selected,
+        supported: engine.supported(),
+        reason: (!engine.supported()).then(|| GGML_MISSING.to_string()),
+    });
+}
+
+/// Pasta `models` (do Handy ou do Prumo): pastas Parakeet ONNX e arquivos `.bin`/`.gguf`.
+fn scan_models_dir(root: &Path, source: &str, selected: Option<&str>, out: &mut Vec<ModelInfo>) {
     let Ok(rd) = std::fs::read_dir(root) else { return };
     for e in rd.flatten() {
         let p = e.path();
-        if !p.is_dir() || quantization_if_parakeet(&p).is_none() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') {
             continue;
         }
-        let id = e.file_name().to_string_lossy().into_owned();
-        // O Handy guarda o id sem o sufixo de quantização ("parakeet-tdt-0.6b-v3").
-        let is_sel = selected.is_some_and(|s| id == s || id.starts_with(&format!("{s}-")));
-        out.push(ModelInfo {
-            id,
-            path: p.to_string_lossy().into_owned(),
-            engine: "parakeet".into(),
-            size_mb: dir_size(&p) / 1_048_576,
-            source: source.into(),
-            selected_in_handy: is_sel,
-        });
+        match classify(&p) {
+            Some(Engine::ParakeetOnnx) => {
+                let sel = is_selected(selected, &[&name]);
+                push(out, name, &p, Engine::ParakeetOnnx, dir_size(&p) / 1_048_576, source, sel);
+            }
+            Some(Engine::Ggml) => {
+                let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| name.clone());
+                // Detector de idioma/VAD não são modelos de transcrição.
+                let low = stem.to_lowercase();
+                if low.contains("silero") || low.contains("vad") || low.contains("language-detect") {
+                    continue;
+                }
+                let mut cands = vec![stem.as_str()];
+                if let Some(h) = handy_id_for_bin(&name) {
+                    cands.push(h);
+                }
+                let sel = is_selected(selected, &cands);
+                let size = e.metadata().map(|m| m.len() / 1_048_576).unwrap_or(0);
+                push(out, stem, &p, Engine::Ggml, size, source, sel);
+            }
+            None => {}
+        }
     }
 }
 
-/// Modelos utilizáveis encontrados no Handy e na pasta própria do Prumo.
-/// O selecionado no Handy vem primeiro.
-pub fn discover() -> Vec<ModelInfo> {
-    let mut out = Vec::new();
-    if let Some(h) = handy_dir() {
-        let sel = handy_selected(&h);
-        scan(&h.join("models"), "handy", sel.as_deref(), &mut out);
+/// O repositório do HuggingFace parece ser de transcrição? Todos os modelos do catálogo do Handy
+/// vêm de `handy-computer/*-gguf`; para outros repositórios, usa palavras-chave comuns.
+fn looks_like_asr_repo(repo_id: &str) -> bool {
+    let low = repo_id.to_lowercase();
+    if low.contains("silero") || low.contains("vad") {
+        return false;
     }
-    scan(&data_dir().join("models"), "prumo", None, &mut out);
-    out.sort_by_key(|m| (!m.selected_in_handy, m.size_mb));
-    out
+    low.starts_with("handy-computer/")
+        || ["whisper", "parakeet", "canary", "moonshine", "sensevoice", "voxtral", "-asr", "asr-", "gigaam"]
+            .iter()
+            .any(|k| low.contains(k))
 }
 
-/// Modelo a usar: o escolhido nas configurações ou o melhor detectado.
+/// Cache do HuggingFace: `models--org--repo/snapshots/<rev>/*.gguf`.
+fn scan_hf_cache(root: &Path, selected: Option<&str>, out: &mut Vec<ModelInfo>) {
+    let Ok(rd) = std::fs::read_dir(root) else { return };
+    let mut seen = std::collections::HashSet::new();
+    for e in rd.flatten() {
+        let folder = e.file_name().to_string_lossy().into_owned();
+        let Some(rest) = folder.strip_prefix("models--") else { continue };
+        let repo_id = rest.replacen("--", "/", 1);
+        if !looks_like_asr_repo(&repo_id) {
+            continue;
+        }
+        let repo_name = repo_id.rsplit('/').next().unwrap_or(&repo_id).to_string();
+        let Ok(snaps) = std::fs::read_dir(e.path().join("snapshots")) else { continue };
+        for snap in snaps.flatten() {
+            let Ok(files) = std::fs::read_dir(snap.path()) else { continue };
+            for f in files.flatten() {
+                let fname = f.file_name().to_string_lossy().into_owned();
+                let p = f.path();
+                // Os arquivos do snapshot costumam ser links para blobs: `is_file` segue o link.
+                if !fname.to_lowercase().ends_with(".gguf") || !p.is_file() {
+                    continue;
+                }
+                if !seen.insert((repo_id.clone(), fname.clone())) {
+                    continue;
+                }
+                let stem = fname.trim_end_matches(".gguf").trim_end_matches(".GGUF").to_string();
+                let sel = is_selected(selected, &[&repo_name, &repo_id, &stem]);
+                let size = p.metadata().map(|m| m.len() / 1_048_576).unwrap_or(0);
+                push(out, format!("{repo_name}/{fname}"), &p, Engine::Ggml, size, "handy-hf", sel);
+            }
+        }
+    }
+}
+
+/// Modelos utilizáveis (e os que o Prumo ainda não consegue usar) encontrados no Handy,
+/// no cache do HuggingFace e na pasta própria do Prumo. Os utilizáveis vêm primeiro e,
+/// entre eles, o selecionado no Handy.
+pub fn discover() -> Discovery {
+    let mut models = Vec::new();
+    let mut searched = Vec::new();
+    let mut note = |p: &Path| searched.push(Searched { path: p.to_string_lossy().into_owned(), exists: p.exists() });
+
+    let mut selected: Option<String> = None;
+    let handy = handy_dirs();
+    for h in &handy {
+        selected = selected.or_else(|| handy_selected(h));
+    }
+    for h in &handy {
+        let dir = h.join("models");
+        note(&dir);
+        scan_models_dir(&dir, "handy", selected.as_deref(), &mut models);
+    }
+    for root in hf_cache_roots() {
+        note(&root);
+        scan_hf_cache(&root, selected.as_deref(), &mut models);
+    }
+    let own = data_dir().join("models");
+    note(&own);
+    scan_models_dir(&own, "prumo", None, &mut models);
+
+    models.sort_by_key(|m| (!m.supported, !m.selected_in_handy, m.size_mb));
+    Discovery { models, searched }
+}
+
+/// Modelo a usar: o escolhido nas configurações ou o melhor detectado que este build suporta.
 pub fn resolve(configured: Option<&str>) -> Option<PathBuf> {
     configured
         .map(PathBuf::from)
-        .filter(|p| quantization_if_parakeet(p).is_some())
-        .or_else(|| discover().into_iter().next().map(|m| PathBuf::from(m.path)))
+        .filter(|p| classify(p).is_some_and(Engine::supported))
+        .or_else(|| discover().models.into_iter().find(|m| m.supported).map(|m| PathBuf::from(m.path)))
 }
 
 /// `samples`: mono, f32, 16 kHz. O modelo é carregado e liberado a cada chamada,
 /// para não manter ~GB de RAM ocupados com o app ocioso.
-pub fn transcribe(model_dir: &Path, samples: &[f32]) -> Result<String, String> {
-    let q = quantization_if_parakeet(model_dir).ok_or("Pasta de modelo inválida (esperado Parakeet ONNX)")?;
-    let mut model = ParakeetModel::load(model_dir, &q).map_err(|e| format!("Falha ao carregar o modelo: {e}"))?;
+pub fn transcribe(model: &Path, samples: &[f32]) -> Result<String, String> {
+    match classify(model) {
+        Some(Engine::ParakeetOnnx) => transcribe_parakeet(model, samples),
+        Some(Engine::Ggml) => transcribe_ggml(model, samples),
+        None => Err("Modelo inválido: esperado uma pasta Parakeet ONNX ou um arquivo .bin/.gguf".into()),
+    }
+}
+
+fn transcribe_parakeet(dir: &Path, samples: &[f32]) -> Result<String, String> {
+    let q = quantization_if_parakeet(dir).ok_or("Pasta de modelo inválida (esperado Parakeet ONNX)")?;
+    let mut model = ParakeetModel::load(dir, &q).map_err(|e| format!("Falha ao carregar o modelo: {e}"))?;
     let res = model
         .transcribe_with(samples, &ParakeetParams::default())
         .map_err(|e| format!("Falha na transcrição: {e}"))?;
     Ok(res.text.trim().to_string())
 }
 
+#[cfg(feature = "ggml")]
+fn transcribe_ggml(path: &Path, samples: &[f32]) -> Result<String, String> {
+    let res = transcribe_cpp::transcribe(path, samples, &transcribe_cpp::RunOptions::default())
+        .map_err(|e| format!("Falha na transcrição (ggml): {e}"))?;
+    Ok(res.text.trim().to_string())
+}
+
+#[cfg(not(feature = "ggml"))]
+fn transcribe_ggml(_path: &Path, _samples: &[f32]) -> Result<String, String> {
+    Err(format!("{GGML_MISSING}. Use um build com a feature `ggml`."))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tmp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("prumo-stt-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
 
     fn touch(dir: &Path, names: &[&str]) {
         std::fs::create_dir_all(dir).unwrap();
@@ -144,29 +368,95 @@ mod tests {
         }
     }
 
+    const PARAKEET: [&str; 5] = ["encoder-model.int8.onnx", "decoder_joint-model.int8.onnx", "nemo128.onnx", "vocab.txt", "._vocab.txt"];
+
     #[test]
-    fn discovers_handy_parakeet_and_marks_selected() {
-        let root = std::env::temp_dir().join(format!("prumo-stt-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
+    fn discovers_parakeet_and_marks_selected() {
+        let root = tmp("pk");
         let models = root.join("models");
-        let good = ["encoder-model.int8.onnx", "decoder_joint-model.int8.onnx", "nemo128.onnx", "vocab.txt", "._vocab.txt"];
-        touch(&models.join("parakeet-tdt-0.6b-v3-int8"), &good);
+        touch(&models.join("parakeet-tdt-0.6b-v3-int8"), &PARAKEET);
         touch(&models.join("incompleto"), &["vocab.txt"]);
         std::fs::write(root.join("settings_store.json"), r#"{"settings":{"selected_model":"parakeet-tdt-0.6b-v3"}}"#).unwrap();
 
         let mut out = Vec::new();
-        scan(&models, "handy", handy_selected(&root).as_deref(), &mut out);
+        scan_models_dir(&models, "handy", handy_selected(&root).as_deref(), &mut out);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].id, "parakeet-tdt-0.6b-v3-int8");
-        assert!(out[0].selected_in_handy);
+        assert_eq!(out[0].engine, "parakeet-onnx");
+        assert!(out[0].selected_in_handy && out[0].supported && out[0].reason.is_none());
         assert!(matches!(quantization_if_parakeet(&models.join("parakeet-tdt-0.6b-v3-int8")), Some(Quantization::Int8)));
         std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
+    fn discovers_bin_and_gguf_files_and_reports_support_by_build() {
+        let root = tmp("bin");
+        let models = root.join("models");
+        touch(&models, &["ggml-small.bin", "meu-modelo.gguf", "ggml-large-v3-turbo.bin.partial", ".oculto.bin", "silero-vad.gguf", "notas.txt"]);
+        let mut out = Vec::new();
+        scan_models_dir(&models, "handy", Some("small"), &mut out);
+        out.sort_by(|a, b| a.id.cmp(&b.id));
+        let ids: Vec<_> = out.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["ggml-small", "meu-modelo"]);
+        assert!(out.iter().all(|m| m.engine == "ggml"));
+        // "small" é o id do Handy para ggml-small.bin
+        assert!(out[0].selected_in_handy && !out[1].selected_in_handy);
+        // Suporte depende de o build incluir o motor ggml.
+        assert!(out.iter().all(|m| m.supported == GGML_ENABLED));
+        assert!(out.iter().all(|m| m.reason.is_some() == !GGML_ENABLED));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn discovers_handy_gguf_models_in_hf_cache() {
+        let root = tmp("hf");
+        let snap = |repo: &str| root.join(format!("models--{repo}")).join("snapshots").join("abc123");
+        touch(&snap("handy-computer--whisper-small-gguf"), &["whisper-small-q5_0.gguf", "README.md"]);
+        touch(&snap("handy-computer--parakeet-tdt-0.6b-v3-gguf"), &["parakeet.gguf"]);
+        touch(&snap("handy-computer--silero-vad-v6.2-gguf"), &["silero.gguf"]);
+        touch(&snap("alguem--llama-3-8b-gguf"), &["llama.gguf"]);
+        touch(&snap("ggerganov--whisper.cpp"), &["ggml-base.gguf"]);
+
+        let mut out = Vec::new();
+        scan_hf_cache(&root, Some("whisper-small"), &mut out);
+        out.sort_by(|a, b| a.id.cmp(&b.id));
+        let ids: Vec<_> = out.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["parakeet-tdt-0.6b-v3-gguf/parakeet.gguf", "whisper-small-gguf/whisper-small-q5_0.gguf", "whisper.cpp/ggml-base.gguf"]
+        );
+        assert!(out.iter().all(|m| m.source == "handy-hf" && m.engine == "ggml"));
+        // selected_model "whisper-small" casa com o repositório "whisper-small-gguf"
+        assert_eq!(out.iter().filter(|m| m.selected_in_handy).count(), 1);
+        assert!(out.iter().find(|m| m.selected_in_handy).unwrap().id.starts_with("whisper-small-gguf"));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn selection_matching_is_tolerant() {
+        assert!(is_selected(Some("small"), &["ggml-small", "small"]));
+        assert!(is_selected(Some("parakeet-tdt-0.6b-v3"), &["parakeet-tdt-0.6b-v3-int8"]));
+        assert!(is_selected(Some("whisper-small"), &["whisper-small-gguf"]));
+        assert!(!is_selected(Some("small"), &["medium", "ggml-medium"]));
+        assert!(!is_selected(None, &["small"]));
+        assert!(!is_selected(Some("  "), &["small"]));
+    }
+
+    #[test]
+    fn classifies_by_path() {
+        let root = tmp("cls");
+        touch(&root.join("pk"), &PARAKEET);
+        touch(&root, &["a.bin", "b.txt"]);
+        assert_eq!(classify(&root.join("pk")), Some(Engine::ParakeetOnnx));
+        assert_eq!(classify(&root.join("a.bin")), Some(Engine::Ggml));
+        assert_eq!(classify(&root.join("b.txt")), None);
+        assert_eq!(classify(&root.join("nao-existe.gguf")), None);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
     fn reads_selected_model_at_root_too() {
-        let root = std::env::temp_dir().join(format!("prumo-stt2-{}", std::process::id()));
-        std::fs::create_dir_all(&root).unwrap();
+        let root = tmp("sel");
         std::fs::write(root.join("settings_store.json"), r#"{"selected_model":"x"}"#).unwrap();
         assert_eq!(handy_selected(&root).as_deref(), Some("x"));
         std::fs::remove_dir_all(&root).ok();
@@ -188,7 +478,7 @@ mod tests {
         assert!(!text.is_empty());
     }
 
-    /// WAV → Parakeet → claude -p real. PRUMO_TEST_WAV=... cargo test --release --lib real_pipeline -- --ignored --nocapture
+    /// WAV → modelo → claude -p real. PRUMO_TEST_WAV=... cargo test --release --lib real_pipeline -- --ignored --nocapture
     #[test]
     #[ignore]
     fn real_pipeline_wav_to_task() {

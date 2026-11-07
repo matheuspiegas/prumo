@@ -24,11 +24,20 @@ export type Settings = {
 };
 export type ModelInfo = {
   id: string;
+  /** Pasta (Parakeet ONNX) ou arquivo (.bin/.gguf). */
   path: string;
-  engine: string;
+  engine: "parakeet-onnx" | "ggml";
   sizeMb: number;
-  source: "handy" | "prumo";
+  source: "handy" | "handy-hf" | "prumo";
   selectedInHandy: boolean;
+  /** Este build do Prumo consegue usar o modelo? */
+  supported: boolean;
+  reason: string | null;
+};
+export type Discovery = {
+  models: ModelInfo[];
+  /** Onde procuramos modelos (ajuda a diagnosticar lista vazia). */
+  searched: { path: string; exists: boolean }[];
 };
 export type ClaudeStatus = { path: string | null; version: string | null; error: string | null };
 export type ClaudeTest = { title: string; date: string | null; notes: string; ms: number };
@@ -65,7 +74,7 @@ export const api = {
   voiceCancel: () => invoke<void>("voice_cancel"),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
-  models: () => invoke<ModelInfo[]>("discover_models"),
+  models: () => invoke<Discovery>("discover_models"),
   detectClaude: (path: string | null) => invoke<ClaudeStatus>("detect_claude", { path }),
   testClaude: (settings: Settings) => invoke<ClaudeTest>("test_claude", { settings }),
 };
