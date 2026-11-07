@@ -1,6 +1,6 @@
 import { motion } from "motion/react";
 import { bouncy } from "@/lib/motion";
-import { CalendarDays, CheckCheck, Inbox, ListTodo, Settings as SettingsIcon, Sunrise, Sun } from "lucide-react";
+import { CalendarDays, CheckCheck, Inbox, ListTodo, Settings as SettingsIcon, Trash2, Sunrise, Sun } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -30,6 +30,8 @@ export function AppSidebar({
   bump,
   settingsActive,
   onSettings,
+  trashActive = false,
+  onTrash,
 }: {
   filter: Filter;
   onFilter: (f: Filter) => void;
@@ -38,6 +40,8 @@ export function AppSidebar({
   bump?: { target: "today" | "tomorrow" | "all"; n: number } | null;
   settingsActive: boolean;
   onSettings: () => void;
+  trashActive?: boolean;
+  onTrash?: () => void;
 }) {
   const targetOf = (f: Filter) => (f === 0 ? "today" : f === 1 ? "tomorrow" : f === 2 ? "all" : null);
   const badge = (f: Filter) => (f === 0 ? counts.today : f === 1 ? counts.tomorrow : 0);
@@ -54,7 +58,7 @@ export function AppSidebar({
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive={!settingsActive && filter === 4} onClick={() => onFilter(4)}>
+                <SidebarMenuButton isActive={!settingsActive && !trashActive && filter === 4} onClick={() => onFilter(4)}>
                   <Inbox />
                   <span>Caixa de entrada</span>
                 </SidebarMenuButton>
@@ -78,7 +82,7 @@ export function AppSidebar({
                       transition={{ duration: 0.6 }}
                     />
                   )}
-                  <SidebarMenuButton isActive={!settingsActive && filter === f} onClick={() => onFilter(f)}>
+                  <SidebarMenuButton isActive={!settingsActive && !trashActive && filter === f} onClick={() => onFilter(f)}>
                     <Icon />
                     <span>{label}</span>
                   </SidebarMenuButton>
@@ -102,6 +106,14 @@ export function AppSidebar({
       </SidebarContent>
       <SidebarFooter className="p-2">
         <SidebarMenu>
+          {onTrash && (
+            <SidebarMenuItem>
+              <SidebarMenuButton isActive={trashActive} onClick={onTrash}>
+                <Trash2 />
+                <span>Lixeira</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
           <SidebarMenuItem>
             <SidebarMenuButton isActive={settingsActive} onClick={onSettings}>
               <SettingsIcon />

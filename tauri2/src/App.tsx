@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import { AppSidebar } from "@/components/app-sidebar";
 import { TaskDialog } from "@/components/task-dialog";
 import { OverdueSection } from "@/components/overdue-section";
+import { TrashView } from "@/components/trash-view";
+import { useUndo } from "@/hooks/use-undo";
 import { SettingsView } from "@/components/settings";
 import { TaskRow } from "@/components/task-row";
 import { VoiceButton } from "@/components/voice-button";
@@ -38,7 +40,7 @@ export default function App() {
   const [dates, setDates] = useState<[string, string]>(["", ""]);
   const [quick, setQuick] = useState("");
   const [dialog, setDialog] = useState<DialogState>({ open: false, task: null });
-  const [view, setView] = useState<"tasks" | "settings">("tasks");
+  const [view, setView] = useState<"tasks" | "settings" | "trash">("tasks");
   const [shortcut, setShortcut] = useState("CommandOrControl+Shift+Space");
 
   // Filtro cuja lista está de fato exibida (muda só quando a nova lista chega).
@@ -125,6 +127,7 @@ export default function App() {
   }, [view]);
 
   const voice = useVoice(refresh);
+  const undo = useUndo(refresh);
 
   // Tarefas criadas por CLI/agentes aparecem ao voltar para a janela.
   useEffect(() => {
@@ -149,6 +152,7 @@ export default function App() {
     if (prevTimer) clearTimeout(prevTimer);
     timers.current.delete(t.id);
     updatePending((m) => m.set(t.id, done));
+    if (done) undo.push("Tarefa concluída", () => api.setDone(t.id, false));
     // A linha deixa a lista quando a mudança a tira do filtro atual.
     const leaves = filter === 3 ? !done : filter <= 2 && done;
     const p = api.setDone(t.id, done).catch((e) => {
@@ -168,6 +172,9 @@ export default function App() {
     if (leaves) timers.current.set(t.id, setTimeout(finish, DONE_EXIT_DELAY));
     else finish();
   };
+
+  const remove = (t: Task) =>
+    run(api.remove(t.id).then(() => undo.push("Tarefa movida para a lixeira", () => api.restore(t.id))));
 
   const commitOrder = () => {
     draggingRef.current = false;
@@ -257,10 +264,14 @@ export default function App() {
         bump={bump}
         settingsActive={view === "settings"}
         onSettings={() => setView("settings")}
+        trashActive={view === "trash"}
+        onTrash={() => setView("trash")}
       />
       <SidebarInset className="overflow-hidden">
         {view === "settings" ? (
           <SettingsView />
+        ) : view === "trash" ? (
+          <TrashView onChanged={refresh} />
         ) : (
         <div className="mx-auto flex h-full w-full max-w-2xl flex-col gap-5 px-8 pt-8">
           <header className="flex items-end justify-between gap-4">
@@ -334,7 +345,7 @@ export default function App() {
                   delay={performance.now() < cascadeUntil.current ? Math.min(i, STAGGER_MAX) * STAGGER_STEP : 0}
                   onOpen={() => setDialog({ open: true, task: t })}
                   onToggle={(done) => toggle(t, done)}
-                  onDelete={() => run(api.remove(t.id))}
+                  onDelete={() => remove(t)}
                   onApprove={(el) => approve(t, el)}
                   onDragStart={() => {
                     draggingRef.current = true;

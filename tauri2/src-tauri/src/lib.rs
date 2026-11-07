@@ -171,7 +171,43 @@ fn approve_task(db: State<AppDb>, id: i64) -> Result<(), String> {
 
 #[tauri::command]
 fn delete_task(db: State<AppDb>, id: i64) -> Result<(), String> {
-    lock(&db)?.delete_task(id).map_err(err)
+    // Excluir = mover para a lixeira (recuperável por 30 dias).
+    lock(&db)?.trash_task(id).map_err(err)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrashDto {
+    task: TaskDto,
+    days_ago: i64,
+    days_left: i64,
+}
+
+#[tauri::command]
+fn list_trash(db: State<AppDb>) -> Result<Vec<TrashDto>, String> {
+    Ok(lock(&db)?
+        .list_trash()
+        .map_err(err)?
+        .into_iter()
+        .map(|i| TrashDto { task: i.task.into(), days_ago: i.days_ago, days_left: i.days_left })
+        .collect())
+}
+
+#[tauri::command]
+fn restore_task(app: AppHandle, db: State<AppDb>, id: i64) -> Result<(), String> {
+    lock(&db)?.restore_task(id).map_err(err)?;
+    let _ = app.emit("tasks-changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+fn purge_task(db: State<AppDb>, id: i64) -> Result<(), String> {
+    lock(&db)?.purge_task(id).map_err(err)
+}
+
+#[tauri::command]
+fn empty_trash(db: State<AppDb>) -> Result<usize, String> {
+    lock(&db)?.empty_trash().map_err(err)
 }
 
 #[tauri::command]
@@ -270,6 +306,7 @@ pub fn run() {
             let dir = data_dir();
             std::fs::create_dir_all(&dir)?;
             app.manage(AppDb(Mutex::new(Db::open(dir.join("prumo.db"))?)));
+            if let Ok(n) = app.state::<AppDb>().0.lock().map(|d| d.purge_expired(30)) { plog!("lixeira: {n:?} descartadas"); }
             app.manage(voice::VoiceState(Mutex::new(None)));
             quickadd::create(app.handle())?;
             let cfg = settings::load();
@@ -309,6 +346,10 @@ pub fn run() {
             set_done,
             approve_task,
             delete_task,
+            list_trash,
+            restore_task,
+            purge_task,
+            empty_trash,
             reorder_tasks,
             list_overdue,
             reschedule_to_today,

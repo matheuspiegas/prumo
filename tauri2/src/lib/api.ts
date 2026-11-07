@@ -62,6 +62,8 @@ export type VoiceResult = {
   inbox: boolean;
 };
 
+export type TrashItem = { task: Task; daysAgo: number; daysLeft: number };
+
 /** 0 Hoje, 1 Amanhã, 2 Todas, 3 Concluídas, 4 Caixa de entrada */
 export type Filter = 0 | 1 | 2 | 3 | 4;
 
@@ -76,6 +78,10 @@ export const api = {
   setDone: (id: number, done: boolean) => invoke<void>("set_done", { id, done }),
   approve: (id: number) => invoke<void>("approve_task", { id }),
   remove: (id: number) => invoke<void>("delete_task", { id }),
+  listTrash: () => invoke<TrashItem[]>("list_trash"),
+  restore: (id: number) => invoke<void>("restore_task", { id }),
+  purge: (id: number) => invoke<void>("purge_task", { id }),
+  emptyTrash: () => invoke<number>("empty_trash"),
   attachments: (taskId: number) => invoke<Attachment[]>("list_attachments", { taskId }),
   attach: (taskId: number, path: string) => invoke<number>("add_attachment", { taskId, path }),
   detach: (id: number) => invoke<void>("delete_attachment", { id }),
