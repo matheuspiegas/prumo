@@ -38,13 +38,15 @@ macro_rules! plog {
     ($($arg:tt)*) => { $crate::logging::write(&format!($($arg)*)) };
 }
 
-pub fn init() {
+/// Log do processo auxiliar: mesmo arquivo, sem rotação nem cabeçalho de início.
+pub fn init_worker() {
     let dir = log_dir();
     let _ = fs::create_dir_all(&dir);
-    let file = dir.join("prumo.log");
-    rotate(&file, MAX_BYTES);
-    let _ = FILE.set(file);
+    let _ = FILE.set(dir.join("prumo.log"));
+    install_panic_hook();
+}
 
+fn install_panic_hook() {
     // Registra o erro (mensagem + local) antes de o processo abortar.
     let prev = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -56,13 +58,43 @@ pub fn init() {
         ));
         prev(info);
     }));
+}
+
+/// Instruções de CPU que o motor de transcrição costuma exigir (ajuda a diagnosticar
+/// "instrução ilegal" quando o binário foi compilado para outra CPU).
+fn cpu_features() -> String {
+    #[cfg(target_arch = "x86_64")]
+    {
+        format!(
+            "avx={} avx2={} fma={} avx512f={}",
+            std::is_x86_feature_detected!("avx"),
+            std::is_x86_feature_detected!("avx2"),
+            std::is_x86_feature_detected!("fma"),
+            std::is_x86_feature_detected!("avx512f")
+        )
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        "n/a".to_string()
+    }
+}
+
+pub fn init() {
+    let dir = log_dir();
+    let _ = fs::create_dir_all(&dir);
+    let file = dir.join("prumo.log");
+    rotate(&file, MAX_BYTES);
+    let _ = FILE.set(file);
+
+    install_panic_hook();
 
     write(&format!(
-        "=== Prumo {} iniciado | so={} arq={} ggml={} ===",
+        "=== Prumo {} iniciado | so={} arq={} ggml={} cpu[{}] ===",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS,
         std::env::consts::ARCH,
-        crate::stt::GGML_ENABLED
+        crate::stt::GGML_ENABLED,
+        cpu_features()
     ));
 }
 

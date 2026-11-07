@@ -68,7 +68,7 @@ fn process(app: &AppHandle, rec: audio::Recording, s: &Settings) -> Result<Outco
     })?;
 
     let _ = app.emit("voice-status", "transcribing");
-    let transcript = stt::transcribe(&model, &samples).inspect_err(|e| crate::plog!("voz: ERRO na transcrição: {e}"))?;
+    let transcript = stt::transcribe_isolated(&model, &samples).inspect_err(|e| crate::plog!("voz: ERRO na transcrição: {e}"))?;
     crate::plog!("voz: transcrição ok ({} caracteres)", transcript.chars().count());
     if transcript.is_empty() {
         return Err("Não consegui ouvir nada na gravação".into());

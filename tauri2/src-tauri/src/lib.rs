@@ -4,6 +4,7 @@ mod logging;
 mod settings;
 mod stt;
 mod voice;
+pub mod worker;
 
 use serde::Serialize;
 use std::{path::PathBuf, sync::Mutex};

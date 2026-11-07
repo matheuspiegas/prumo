@@ -361,6 +361,103 @@ fn transcribe_ggml(_path: &Path, _samples: &[f32]) -> Result<String, String> {
     Err(format!("{GGML_MISSING}. Use um build com a feature `ggml`."))
 }
 
+/// Tempo máximo do processo de transcrição (carregar um modelo grande na CPU pode demorar).
+const WORKER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Transcreve em um processo separado (o próprio executável, com `--stt-worker`). Se o motor
+/// nativo cair, só o processo auxiliar morre: o app mostra o erro e registra o código de saída.
+pub fn transcribe_isolated(model: &Path, samples: &[f32]) -> Result<String, String> {
+    let exe = std::env::current_exe().map_err(|e| format!("Não achei o executável do Prumo: {e}"))?;
+    run_worker(&exe, &data_dir().join("tmp"), model, samples)
+}
+
+fn run_worker(exe: &Path, tmp_dir: &Path, model: &Path, samples: &[f32]) -> Result<String, String> {
+    use std::process::{Command, Stdio};
+    std::fs::create_dir_all(tmp_dir).map_err(|e| format!("Não consegui criar a pasta temporária: {e}"))?;
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let tag = format!("{}-{nanos}", std::process::id());
+    let pcm = tmp_dir.join(format!("stt-{tag}.f32"));
+    let out = tmp_dir.join(format!("stt-{tag}.json"));
+
+    let mut bytes = Vec::with_capacity(samples.len() * 4);
+    for s in samples {
+        bytes.extend_from_slice(&s.to_le_bytes());
+    }
+    std::fs::write(&pcm, &bytes).map_err(|e| format!("Não consegui gravar o áudio temporário: {e}"))?;
+
+    let result = (|| {
+        let mut cmd = Command::new(exe);
+        cmd.arg("--stt-worker").arg(model).arg(&pcm).arg(&out).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // sem janela de console
+        }
+        crate::plog!("stt: iniciando processo de transcrição");
+        let mut child = cmd.spawn().map_err(|e| format!("Não foi possível iniciar a transcrição: {e}"))?;
+        let start = std::time::Instant::now();
+        let status = loop {
+            match child.try_wait().map_err(|e| e.to_string())? {
+                Some(s) => break s,
+                None if start.elapsed() > WORKER_TIMEOUT => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let msg = format!("A transcrição não terminou em {}s e foi cancelada", WORKER_TIMEOUT.as_secs());
+                    crate::plog!("stt: {msg}");
+                    return Err(msg);
+                }
+                None => std::thread::sleep(std::time::Duration::from_millis(50)),
+            }
+        };
+        match std::fs::read_to_string(&out).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
+            Some(v) if v["ok"] == true => Ok(v["text"].as_str().unwrap_or("").to_string()),
+            Some(v) => Err(v["error"].as_str().unwrap_or("erro desconhecido").to_string()),
+            None => {
+                let how = describe_exit(&status);
+                crate::plog!("stt: processo de transcrição morreu sem resultado: {how}");
+                Err(format!("A transcrição fechou inesperadamente ({how}). Veja o log em Configurações > Diagnóstico."))
+            }
+        }
+    })();
+    let _ = std::fs::remove_file(&pcm);
+    let _ = std::fs::remove_file(&out);
+    result
+}
+
+/// Descreve como o processo terminou (sinal no Unix, código NTSTATUS no Windows).
+fn describe_exit(st: &std::process::ExitStatus) -> String {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(sig) = st.signal() {
+            let what = match sig {
+                4 => " (instrução ilegal)",
+                6 => " (abort)",
+                9 => " (encerrado pelo sistema, possivelmente falta de memória)",
+                11 => " (acesso inválido à memória)",
+                _ => "",
+            };
+            return format!("sinal {sig}{what}");
+        }
+    }
+    match st.code() {
+        Some(c) => {
+            let u = c as u32;
+            let what = match u {
+                0xC000_001D => " (instrução ilegal: a CPU não tem instruções que o motor usa)",
+                0xC000_0005 => " (acesso inválido à memória)",
+                0xC000_0409 => " (falha fatal / abort)",
+                0xC000_00FD => " (estouro de pilha)",
+                0xC000_0017 | 0xE000_0001 => " (sem memória)",
+                101 => " (erro interno do Rust: veja a linha PÂNICO no log)",
+                _ => "",
+            };
+            format!("código de saída 0x{u:08X}{what}")
+        }
+        None => "encerrado sem código de saída".into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,6 +538,57 @@ mod tests {
         assert_eq!(out.iter().filter(|m| m.selected_in_handy).count(), 1);
         assert!(out.iter().find(|m| m.selected_in_handy).unwrap().id.starts_with("whisper-small-gguf"));
         std::fs::remove_dir_all(&root).ok();
+    }
+
+
+    #[cfg(unix)]
+    fn fake_exe(dir: &Path, name: &str, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let p = dir.join(name);
+        std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn isolated_worker_returns_text_and_errors() {
+        let d = tmp("iso");
+        let tmpdir = d.join("t");
+        // $1=--stt-worker $2=modelo $3=pcm $4=saida
+        let ok = fake_exe(&d, "ok", r#"printf '{"ok":true,"text":"ola mundo"}' > "$4""#);
+        let err = fake_exe(&d, "err", r#"printf '{"ok":false,"error":"modelo ruim"}' > "$4""#);
+        assert_eq!(run_worker(&ok, &tmpdir, Path::new("m"), &[0.1, 0.2]).unwrap(), "ola mundo");
+        assert_eq!(run_worker(&err, &tmpdir, Path::new("m"), &[0.1]).unwrap_err(), "modelo ruim");
+        // arquivos temporários são removidos
+        assert_eq!(std::fs::read_dir(&tmpdir).unwrap().count(), 0);
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn isolated_worker_reports_a_native_crash_instead_of_dying() {
+        let d = tmp("crash");
+        let tmpdir = d.join("t");
+        let segv = fake_exe(&d, "segv", "kill -SEGV $$");
+        let ill = fake_exe(&d, "ill", "kill -ILL $$");
+        let exit7 = fake_exe(&d, "exit7", "exit 7");
+        let e = run_worker(&segv, &tmpdir, Path::new("m"), &[0.0]).unwrap_err();
+        assert!(e.contains("fechou inesperadamente") && e.contains("sinal 11") && e.contains("acesso inválido"), "{e}");
+        let e = run_worker(&ill, &tmpdir, Path::new("m"), &[0.0]).unwrap_err();
+        assert!(e.contains("sinal 4") && e.contains("instrução ilegal"), "{e}");
+        let e = run_worker(&exit7, &tmpdir, Path::new("m"), &[0.0]).unwrap_err();
+        assert!(e.contains("0x00000007"), "{e}");
+        assert_eq!(std::fs::read_dir(&tmpdir).unwrap().count(), 0);
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn missing_worker_executable_is_a_clean_error() {
+        let d = tmp("missing");
+        let e = run_worker(&d.join("nao-existe"), &d.join("t"), Path::new("m"), &[0.0]).unwrap_err();
+        assert!(e.contains("Não foi possível iniciar"), "{e}");
+        std::fs::remove_dir_all(&d).ok();
     }
 
     #[test]
