@@ -4,6 +4,7 @@ import { useRef, useState, type Ref } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { PriorityDot } from "@/components/priority-select";
 import { dueLabel, type Task } from "@/lib/api";
 import { rowVariants } from "@/lib/motion";
 import { cn } from "@/lib/utils";
@@ -23,7 +24,10 @@ export function TaskRow({
   onApprove,
   onDragStart,
   onDragEnd,
+  extra,
 }: {
+  /** Ações extras (ex.: "Reagendar para hoje") antes do botão de excluir. */
+  extra?: React.ReactNode;
   task: Task;
   /** Estado de conclusão exibido (pode ser otimista, diferente de task.done). */
   done: boolean;
@@ -87,6 +91,7 @@ export function TaskRow({
           />
         </motion.span>
       </span>
+      <PriorityDot priority={task.priority} />
       {task.source !== "manual" && (
         <Badge variant="secondary" className="gap-1 capitalize">
           <Sparkles className="size-3" />
@@ -99,6 +104,7 @@ export function TaskRow({
         </span>
       )}
       <span className="flex items-center gap-1" onClick={stop}>
+        {extra}
         {inbox ? (
           <>
             <Button size="sm" variant="outline" onClick={(e) => onApprove(e.currentTarget.closest("li"))}>

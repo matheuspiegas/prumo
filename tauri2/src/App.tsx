@@ -7,6 +7,7 @@ import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import { AppSidebar } from "@/components/app-sidebar";
 import { TaskDialog } from "@/components/task-dialog";
+import { OverdueSection } from "@/components/overdue-section";
 import { SettingsView } from "@/components/settings";
 import { TaskRow } from "@/components/task-row";
 import { VoiceButton } from "@/components/voice-button";
@@ -33,6 +34,7 @@ export default function App() {
   const [filter, setFilter] = useState<Filter>(0);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [counts, setCounts] = useState<Counts>({ today: 0, tomorrow: 0, inbox: 0 });
+  const [overdue, setOverdue] = useState<Task[]>([]);
   const [dates, setDates] = useState<[string, string]>(["", ""]);
   const [quick, setQuick] = useState("");
   const [dialog, setDialog] = useState<DialogState>({ open: false, task: null });
@@ -74,8 +76,9 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [list, c, d] = await Promise.all([api.list(filter), api.counts(), api.dates()]);
+      const [list, c, d, od] = await Promise.all([api.list(filter), api.counts(), api.dates(), api.overdue()]);
       if (filterRef.current !== filter) return; // resposta de um filtro já abandonado
+      setOverdue(od);
       setCounts(c);
       setDates(d);
       if (draggingRef.current) return; // não sobrescreve a ordem durante o arrasto
@@ -250,7 +253,7 @@ export default function App() {
           setFilter(f);
           setView("tasks");
         }}
-        counts={hold ? { ...counts, [hold.key]: hold.value } : counts}
+        counts={{ ...(hold ? { ...counts, [hold.key]: hold.value } : counts), today: (hold?.key === "today" ? hold.value : counts.today) + overdue.length }}
         bump={bump}
         settingsActive={view === "settings"}
         onSettings={() => setView("settings")}
@@ -285,6 +288,31 @@ export default function App() {
             />
           )}
 
+          {listFilter === 0 && (
+            <OverdueSection tasks={overdue} onRescheduleAll={() => run(api.rescheduleToToday())}>
+              {overdue.map((t) => (
+                <TaskRow
+                  key={t.id}
+                  task={t}
+                  done={pending.get(t.id) ?? t.done}
+                  today={today}
+                  tomorrow={tomorrow}
+                  inbox={false}
+                  reorderable={false}
+                  delay={0}
+                  onOpen={() => setDialog({ open: true, task: t })}
+                  onToggle={(done) => toggle(t, done)}
+                  onDelete={() => run(api.remove(t.id))}
+                  onApprove={() => {}}
+                  extra={
+                    <Button size="xs" variant="outline" onClick={() => run(api.rescheduleToToday(t.id))}>
+                      Reagendar para hoje
+                    </Button>
+                  }
+                />
+              ))}
+            </OverdueSection>
+          )}
           {listFilter !== null && (
             <ListContainer
               key={listFilter}

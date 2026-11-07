@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 // Cada assunto vive no seu arquivo, com seu próprio `impl Db { ... }`.
 // Assim agentes diferentes não conflitam ao editar.
+mod overdue; // atrasadas, reagendar e prioridade
 mod recurrence; // recorrência de tarefas
 mod reminders; // lembretes com hora (due_time / reminded_at)
 mod search; // busca
@@ -76,7 +77,7 @@ const SCHEMA_VERSION: i64 = 2;
 /// Filtro das listagens "normais": fora da lixeira e sem subtarefas.
 pub(crate) const LIVE: &str = "deleted_at IS NULL AND parent_id IS NULL";
 
-fn row_to_task(r: &rusqlite::Row) -> Result<Task> {
+pub(crate) fn row_to_task(r: &rusqlite::Row) -> Result<Task> {
     Ok(Task {
         id: r.get(0)?,
         title: r.get(1)?,

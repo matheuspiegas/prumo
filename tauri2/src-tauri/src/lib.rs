@@ -138,6 +138,29 @@ fn reorder_tasks(db: State<AppDb>, ids: Vec<i64>) -> Result<(), String> {
     lock(&db)?.reorder(&ids).map_err(err)
 }
 
+/// Tarefas atrasadas (vencimento anterior a hoje, não concluídas).
+#[tauri::command]
+fn list_overdue(db: State<AppDb>) -> Result<Vec<TaskDto>, String> {
+    let tasks = lock(&db)?.overdue(&today()).map_err(err)?;
+    Ok(tasks.into_iter().map(Into::into).collect())
+}
+
+/// Reagenda para hoje: só a tarefa `id` ou, sem `id`, todas as atrasadas.
+#[tauri::command]
+fn reschedule_to_today(db: State<AppDb>, id: Option<i64>) -> Result<(), String> {
+    let db = lock(&db)?;
+    match id {
+        Some(id) => db.set_due_date(id, Some(&today())).map_err(err),
+        None => db.reschedule_overdue(&today()).map(|_| ()).map_err(err),
+    }
+}
+
+/// Prioridade: 0 nenhuma, 1 baixa, 2 média, 3 alta.
+#[tauri::command]
+fn set_priority(db: State<AppDb>, id: i64, priority: i64) -> Result<(), String> {
+    lock(&db)?.set_priority(id, priority).map_err(err)
+}
+
 #[tauri::command]
 fn list_attachments(db: State<AppDb>, task_id: i64) -> Result<Vec<AttachmentDto>, String> {
     Ok(lock(&db)?
@@ -246,6 +269,9 @@ pub fn run() {
             approve_task,
             delete_task,
             reorder_tasks,
+            list_overdue,
+            reschedule_to_today,
+            set_priority,
             list_attachments,
             add_attachment,
             delete_attachment,

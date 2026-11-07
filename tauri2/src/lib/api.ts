@@ -79,6 +79,10 @@ export const api = {
   detach: (id: number) => invoke<void>("delete_attachment", { id }),
   open: (path: string) => invoke<void>("open_attachment", { path }),
   reorder: (ids: number[]) => invoke<void>("reorder_tasks", { ids }),
+  overdue: () => invoke<Task[]>("list_overdue"),
+  /** Sem `id`, reagenda todas as atrasadas para hoje. */
+  rescheduleToToday: (id?: number) => invoke<void>("reschedule_to_today", { id: id ?? null }),
+  setPriority: (id: number, priority: number) => invoke<void>("set_priority", { id, priority }),
   quickAdd: (title: string, date: string | null) => invoke<number>("quick_add_task", { title, date }),
   openLogs: () => invoke<string>("open_logs"),
   voiceStart: () => invoke<void>("voice_start"),

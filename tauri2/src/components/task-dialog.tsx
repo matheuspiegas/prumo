@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { DatePicker } from "@/components/date-picker";
+import { PrioritySelect } from "@/components/priority-select";
 import { api, baseName, formatSize, type Attachment, type Task } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +32,7 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [date, setDate] = useState<string | null>(null);
+  const [priority, setPriority] = useState(0);
   const [saved, setSaved] = useState<Attachment[]>([]);
   const [pending, setPending] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -42,6 +44,7 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
     setTitle(task?.title ?? "");
     setNotes(task?.notes ?? "");
     setDate(task ? task.due : defaultDate);
+    setPriority(task?.priority ?? 0);
     setPending([]);
     setSaved([]);
     if (task) loadAttachments(task.id).catch((e) => toast.error(String(e)));
@@ -101,8 +104,10 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
     try {
       if (task) {
         await api.update(task.id, t, notes, date);
+        if (priority !== task.priority) await api.setPriority(task.id, priority);
       } else {
         const id = await api.add(t, notes, date);
+        if (priority) await api.setPriority(id, priority);
         for (const p of pending) await api.attach(id, p);
       }
       onSaved();
@@ -142,6 +147,10 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
           <div className="flex flex-col gap-1.5">
             <Label>Data</Label>
             <DatePicker value={date} onChange={setDate} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Prioridade</Label>
+            <PrioritySelect value={priority} onChange={setPriority} />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="notes">Notas</Label>
