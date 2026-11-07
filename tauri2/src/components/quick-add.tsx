@@ -4,12 +4,18 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { format } from "date-fns";
 import { ptBR as dfPtBR } from "date-fns/locale";
 import { ptBR } from "react-day-picker/locale";
-import { CalendarIcon, Loader2, Mic, Square } from "lucide-react";
-import { api, fromIso, toIso } from "@/lib/api";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { CalendarIcon, Check, Loader2, Mic, Square } from "lucide-react";
+import { api, fromIso, toIso, type VoiceResult } from "@/lib/api";
 import { Calendar } from "@/components/ui/calendar";
 import { useVoice } from "@/hooks/use-voice";
 import { VoiceWaves } from "@/components/voice-waves";
 import { cn } from "@/lib/utils";
+
+type Done = { title: string; date: string | null; inbox: boolean; warning: string | null };
+
+/** Folga (px) que a janela ganha ao abrir o calendário; é transparente, então não aparece. */
+const CALENDAR_ROOM = 360;
 
 /** Janelinha flutuante: Enter cria a tarefa, Esc fecha, microfone usa o fluxo de voz. */
 export function QuickAdd() {
@@ -28,10 +34,39 @@ export function QuickAdd() {
     getCurrentWindow().hide().catch(() => {});
   }, []);
 
+  // Feedback de sucesso (mostrado ~1,2 s antes de esconder a janela).
+  const [done, setDone] = useState<Done | null>(null);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reduceMotion = useReducedMotion();
+
+  const clearHideTimer = useCallback(() => {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = null;
+  }, []);
+
+  const showDone = useCallback(
+    (d: Done) => {
+      clearHideTimer();
+      setDone(d);
+      hideTimer.current = setTimeout(() => {
+        hideTimer.current = null;
+        close();
+      }, 1200);
+    },
+    [clearHideTimer, close],
+  );
+
+  useEffect(() => clearHideTimer, [clearHideTimer]);
+
   const reset = useCallback(() => {
+    clearHideTimer();
+    setDone(null);
     setTitle("");
     setDate(null);
     setCalendarOpen(false);
+    calendarRef.current = false;
+    animating.current = false;
+    fit.current();
     setError(null);
     setSaving(false);
     api.dates().then(([t, a]) => {
@@ -40,24 +75,58 @@ export function QuickAdd() {
     });
     // Aguarda a janela aparecer antes de focar.
     requestAnimationFrame(() => input.current?.focus());
-  }, []);
+  }, [clearHideTimer]);
 
-  // A voz cria a tarefa no Rust; aqui só fechamos a janela.
-  const voice = useVoice(close);
+  // A voz cria a tarefa no Rust; aqui mostramos o resultado e só depois fechamos.
+  const onVoiceCreated = useCallback(
+    (r: VoiceResult) =>
+      showDone({
+        title: r.title,
+        date: r.date,
+        inbox: r.inbox,
+        warning: r.fallback || r.warning ? `Não consegui interpretar com o Claude${r.warning ? ` (${r.warning})` : ""}; usei o texto bruto.` : null,
+      }),
+    [showDone],
+  );
+  const onVoiceError = useCallback((msg: string) => setError(msg), []);
+  const voice = useVoice(onVoiceCreated, { quiet: true, onError: onVoiceError });
   const voiceBusy = voice.state !== "idle";
+  const working = voice.state === "transcribing" || voice.state === "interpreting";
 
-  // A janela acompanha a altura do cartão (cresce quando o calendário abre).
+  // A janela acompanha a altura do cartão. Com o calendário não dá para seguir o cartão quadro a
+  // quadro (o redimensionamento nativo pula): ao abrir, a janela (transparente) cresce de uma vez
+  // com folga e o cartão anima por dentro; ao terminar a animação, ajusta ao tamanho exato.
+  const animating = useRef(false);
+  const fit = useRef<() => void>(() => {});
   useEffect(() => {
     const el = card.current;
     if (!el) return;
-    const fit = () => {
+    fit.current = () => {
+      if (animating.current) return;
       const h = Math.ceil(el.getBoundingClientRect().height) + 16;
       getCurrentWindow().setSize(new LogicalSize(560, h)).catch(() => {});
     };
-    const ro = new ResizeObserver(fit);
+    const ro = new ResizeObserver(() => fit.current());
     ro.observe(el);
-    fit();
+    fit.current();
     return () => ro.disconnect();
+  }, []);
+
+  const calendarRef = useRef(false);
+  const toggleCalendar = useCallback(() => {
+    const open = calendarRef.current;
+    calendarRef.current = !open;
+    animating.current = true;
+    if (!open) {
+      const h = Math.ceil(card.current?.getBoundingClientRect().height ?? 90) + CALENDAR_ROOM + 16;
+      getCurrentWindow().setSize(new LogicalSize(560, h)).catch(() => {});
+    }
+    setCalendarOpen(!open);
+  }, []);
+
+  const settle = useCallback(() => {
+    animating.current = false;
+    fit.current();
   }, []);
 
   useEffect(() => {
@@ -71,13 +140,16 @@ export function QuickAdd() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (calendarOpen) setCalendarOpen(false);
+      if (done) {
+        clearHideTimer();
+        close();
+      } else if (calendarOpen) toggleCalendar();
       else if (voice.state === "recording") void voice.cancel();
       else close();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [close, voice, calendarOpen]);
+  }, [close, voice, calendarOpen, done, clearHideTimer, toggleCalendar]);
 
   const submit = async () => {
     const t = title.trim();
@@ -86,8 +158,10 @@ export function QuickAdd() {
     setError(null);
     try {
       await api.quickAdd(t, date);
+      // Sem aprovação automática a tarefa vai para a caixa de entrada (igual ao Rust).
+      const auto = await api.getSettings().then((s) => s.autoApprove).catch(() => false);
       setTitle("");
-      close();
+      showDone({ title: t, date, inbox: !auto, warning: null });
     } catch (e) {
       setError(String(e));
     } finally {
@@ -96,12 +170,49 @@ export function QuickAdd() {
   };
 
   const recording = voice.state === "recording";
+  const fade = reduceMotion
+    ? {}
+    : { initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.15 } };
+
+  if (done) {
+    const d = done.date ? fromIso(done.date) : null;
+    const detail = [
+      d ? format(d, "EEEE, d 'de' MMMM", { locale: dfPtBR }) : null,
+      done.inbox ? "na caixa de entrada" : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    return (
+      <div className="flex h-screen w-screen items-start justify-center p-2">
+        <div ref={card} className="flex w-full flex-col justify-center rounded-2xl border bg-card px-4 py-2 text-card-foreground shadow-lg">
+          <motion.div {...fade} role="status" className="flex items-center gap-3">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-primary bg-primary/10 text-primary">
+              <Check className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-base leading-tight">
+                <span className="text-muted-foreground">Tarefa criada · </span>
+                {done.title}
+              </p>
+              <p className="h-4 truncate text-xs leading-4 text-muted-foreground">{detail}</p>
+            </div>
+          </motion.div>
+          <p className="h-[26px] truncate pt-1 text-xs leading-5 text-muted-foreground">{done.warning}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen w-screen items-start justify-center p-2">
       <div ref={card} className="flex w-full flex-col justify-center rounded-2xl border bg-card px-4 py-2 text-card-foreground shadow-lg">
         <div className="flex items-center gap-2">
-          {recording ? (
+          {working ? (
+            <motion.div {...fade} role="status" className="flex h-9 flex-1 items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              <span>{voice.state === "transcribing" ? "Transcrevendo…" : "Interpretando…"}</span>
+            </motion.div>
+          ) : recording ? (
             <div className="flex h-9 flex-1 items-center gap-2 text-sm text-muted-foreground">
               <VoiceWaves level={voice.level} />
               <span>Gravando… clique no quadrado para criar</span>
@@ -122,7 +233,7 @@ export function QuickAdd() {
                   void submit();
                 }
               }}
-              placeholder={voiceBusy ? "Processando voz…" : "Nova tarefa… (Enter para salvar)"}
+              placeholder="Nova tarefa… (Enter para salvar)"
               className="h-9 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground"
             />
           )}
@@ -153,7 +264,7 @@ export function QuickAdd() {
             <button
               key={label}
               type="button"
-              disabled={!iso}
+              disabled={!iso || working}
               onClick={() => setDate(date === iso ? null : iso)}
               className={cn(
                 "rounded-md border px-2.5 py-1 text-xs transition-colors hover:bg-muted",
@@ -165,7 +276,8 @@ export function QuickAdd() {
           ))}
           <button
             type="button"
-            onClick={() => setCalendarOpen((o) => !o)}
+            onClick={toggleCalendar}
+            disabled={working}
             className={cn(
               "flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors hover:bg-muted",
               date && date !== today && date !== tomorrow && "border-primary bg-primary/10 text-primary",
@@ -177,21 +289,35 @@ export function QuickAdd() {
               : "Escolher data"}
           </button>
         </div>
-        {calendarOpen && (
-          <div className="flex justify-center border-t pt-2">
-            <Calendar
-              mode="single"
-              locale={ptBR}
-              selected={date ? fromIso(date) : undefined}
-              defaultMonth={date ? fromIso(date) : undefined}
-              onSelect={(d) => {
-                setDate(d ? toIso(d) : null);
-                setCalendarOpen(false);
-                input.current?.focus();
+        <AnimatePresence initial={false} onExitComplete={settle}>
+          {calendarOpen && (
+            <motion.div
+              key="calendario"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={reduceMotion ? { duration: 0 } : { duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
+              onAnimationComplete={(def) => {
+                if (typeof def === "object" && "height" in def && def.height === "auto") settle();
               }}
-            />
-          </div>
-        )}
+              className="overflow-hidden"
+            >
+              <div className="flex justify-center border-t pt-2">
+                <Calendar
+                  mode="single"
+                  locale={ptBR}
+                  selected={date ? fromIso(date) : undefined}
+                  defaultMonth={date ? fromIso(date) : undefined}
+                  onSelect={(d) => {
+                    setDate(d ? toIso(d) : null);
+                    toggleCalendar();
+                    input.current?.focus();
+                  }}
+                />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
         {error && <p className="truncate pb-1 text-xs text-destructive">{error}</p>}
       </div>
     </div>

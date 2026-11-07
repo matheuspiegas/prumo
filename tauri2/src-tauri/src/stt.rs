@@ -409,6 +409,9 @@ fn run_worker(exe: &Path, tmp_dir: &Path, model: &Path, samples: &[f32]) -> Resu
                 None => std::thread::sleep(std::time::Duration::from_millis(50)),
             }
         };
+        // Tempo total do processo auxiliar, do início ao fim. Comparado com o "stt: terminou em"
+        // (que é gravado pelo próprio worker), mostra quanto custa só iniciar e encerrar o processo.
+        crate::plog!("stt: processo auxiliar encerrou após {:.2?}", start.elapsed());
         match std::fs::read_to_string(&out).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
             Some(v) if v["ok"] == true => Ok(v["text"].as_str().unwrap_or("").to_string()),
             Some(v) => Err(v["error"].as_str().unwrap_or("erro desconhecido").to_string()),

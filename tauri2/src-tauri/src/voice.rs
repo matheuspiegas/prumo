@@ -61,16 +61,20 @@ fn process(app: &AppHandle, rec: audio::Recording, s: &Settings) -> Result<Outco
         return Err("Gravação muito curta".into());
     }
     let model = stt::resolve(s.stt_model_dir.as_deref()).ok_or_else(|| {
-        if stt::discover().models.iter().any(|m| !m.supported) {
+        let msg = if stt::discover().models.iter().any(|m| !m.supported) {
             "Encontrei modelos do Handy, mas este build do Prumo não consegue usá-los (falta o motor ggml). Veja Configurações > Voz.".to_string()
         } else {
             "Nenhum modelo de transcrição encontrado. Instale o Handy ou escolha um modelo em Configurações.".to_string()
-        }
+        };
+        // Sem isto a falha não deixava rastro no log (o build sem ggml parecia travar em silêncio).
+        crate::plog!("voz: ERRO ao escolher o modelo: {msg}");
+        msg
     })?;
 
     let _ = app.emit("voice-status", "transcribing");
+    let t_stt = Instant::now();
     let transcript = stt::transcribe_isolated(&model, &samples).inspect_err(|e| crate::plog!("voz: ERRO na transcrição: {e}"))?;
-    crate::plog!("voz: transcrição ok ({} caracteres)", transcript.chars().count());
+    crate::plog!("voz: transcrição ok ({} caracteres) em {:.2?} (inclui iniciar o processo auxiliar)", transcript.chars().count(), t_stt.elapsed());
     if transcript.is_empty() {
         return Err("Não consegui ouvir nada na gravação".into());
     }
