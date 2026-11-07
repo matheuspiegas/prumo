@@ -31,7 +31,10 @@ export function TaskRow({
   extra,
   selected,
   highlight,
+  onTagClick,
 }: {
+  /** Clique numa tag da linha (filtra por ela). */
+  onTagClick?: (name: string) => void;
   /** Ações extras (ex.: "Reagendar para hoje") antes do botão de excluir. */
   extra?: React.ReactNode;
   task: Task;
@@ -120,7 +123,7 @@ export function TaskRow({
       {task.tags?.length > 0 && (
         <span className="flex shrink-0 items-center gap-1">
           {task.tags.slice(0, 3).map((t) => (
-            <TagChip key={t} name={t} />
+            <TagChip key={t} name={t} onClick={onTagClick ? () => onTagClick(t) : undefined} />
           ))}
           {task.tags.length > 3 && <span className="text-xs text-muted-foreground">+{task.tags.length - 3}</span>}
         </span>

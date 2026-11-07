@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Children, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { animate, AnimatePresence, motion, Reorder, useReducedMotion } from "motion/react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Inbox, ListChecks, Plus, SearchX } from "lucide-react";
+import { Inbox, ListChecks, Plus, SearchX, X } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import { AppSidebar } from "@/components/app-sidebar";
@@ -260,11 +260,20 @@ export default function App() {
     setTimeout(() => setHold(null), 1500);
   };
 
+  // Clique numa tag dentro de uma linha: filtra por ela (e limpa a busca).
+  const openTag = (name: string) => {
+    setQuery("");
+    setActiveTag(name);
+    setFilter(2);
+    setView("tasks");
+  };
+
   const quickAdd = () => {
     const t = quick.trim();
     if (!t) return;
     setQuick("");
-    run(api.add(t, "", defaultDate));
+    // Com um filtro de tag ativo, a tarefa nova já nasce com a tag (senão sumiria da tela).
+    run(api.add(t, "", defaultDate).then((id) => (activeTag ? api.setTags(id, [activeTag]) : undefined)));
   };
 
   // Busca: re-executa quando o termo ou a lista mudam (ex.: após concluir/excluir).
@@ -355,8 +364,12 @@ export default function App() {
         tags={tagList}
         activeTag={activeTag}
         onTag={(name) => {
-          setActiveTag(name);
-          setFilter(2);
+          // Clicar na tag já ativa desfaz o filtro.
+          if (activeTag?.toLowerCase() === name.toLowerCase()) setActiveTag(null);
+          else {
+            setActiveTag(name);
+            setFilter(2);
+          }
           setView("tasks");
         }}
         onFilter={(f) => {
@@ -382,6 +395,15 @@ export default function App() {
             <div>
               <h1 className="text-2xl font-semibold tracking-tight">{activeTag ? `#${activeTag}` : TITLES[filter]}</h1>
               {subtitle && <p className="mt-1 text-sm text-muted-foreground first-letter:uppercase">{subtitle}</p>}
+              {activeTag && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTag(null)}
+                  className="mt-1 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted"
+                >
+                  Filtrando por #{activeTag} <X className="size-3" />
+                </button>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <SearchBox value={query} onChange={setQuery} inputRef={searchRef} />
@@ -410,6 +432,7 @@ export default function App() {
                 <TaskRow
                   key={t.id}
                   task={t}
+                  onTagClick={openTag}
                   done={pending.get(t.id) ?? t.done}
                   today={today}
                   tomorrow={tomorrow}
@@ -442,6 +465,7 @@ export default function App() {
                 <TaskRow
                   key={t.id}
                   task={t}
+                  onTagClick={openTag}
                   done={pending.get(t.id) ?? t.done}
                   today={today}
                   tomorrow={tomorrow}
@@ -489,6 +513,7 @@ export default function App() {
         open={dialog.open}
         task={dialog.task}
         defaultDate={defaultDate}
+        defaultTags={activeTag ? [activeTag] : undefined}
         onClose={() => setDialog((d) => ({ ...d, open: false }))}
         onSaved={refresh}
       />
@@ -513,7 +538,26 @@ function ListContainer({
   empty: boolean;
   children: React.ReactNode;
 }) {
-  const className = cn("relative -mx-3 flex flex-col gap-0.5 overflow-y-auto", !empty && "pb-8");
+  // Ao sair uma linha, as de baixo sobem animando a partir da posição antiga e, por um instante,
+  // passam do fim do contêiner: a barra de rolagem piscava. Travamos o eixo vertical só durante
+  // o deslize. O eixo horizontal fica sempre cortado (a linha que sai desliza para a direita).
+  const count = Children.count(children);
+  const prevCount = useRef(count);
+  const [settling, setSettling] = useState(false);
+  // useLayoutEffect: roda antes da pintura. Com useEffect o primeiro quadro (justo o da barra) escapava.
+  useLayoutEffect(() => {
+    const shrank = count < prevCount.current;
+    prevCount.current = count;
+    if (!shrank) return;
+    setSettling(true);
+    const t = setTimeout(() => setSettling(false), 900);
+    return () => clearTimeout(t);
+  }, [count]);
+  const className = cn(
+    "relative -mx-3 flex flex-col gap-0.5 overflow-x-hidden",
+    settling ? "overflow-y-hidden" : "overflow-y-auto",
+    !empty && "pb-8",
+  );
   const presence = (
     <AnimatePresence initial={!firstPaint} mode="popLayout">
       {children}

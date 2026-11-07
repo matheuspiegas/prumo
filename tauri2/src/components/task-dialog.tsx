@@ -28,11 +28,13 @@ type Props = {
   /** `null` = nova tarefa */
   task: Task | null;
   defaultDate: string | null;
+  /** Tags já aplicadas a uma tarefa nova (ex.: quando há um filtro de tag ativo). */
+  defaultTags?: string[];
   onClose: () => void;
   onSaved: () => void;
 };
 
-export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props) {
+export function TaskDialog({ open, task, defaultDate, defaultTags, onClose, onSaved }: Props) {
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [date, setDate] = useState<string | null>(null);
@@ -56,9 +58,9 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
     setTime(task?.dueTime ?? null);
     setPending([]);
     setSaved([]);
-    setTags(task?.tags ?? []);
+    setTags(task?.tags ?? defaultTags ?? []);
     if (task) loadAttachments(task.id).catch((e) => toast.error(String(e)));
-  }, [open, task, defaultDate, loadAttachments]);
+  }, [open, task, defaultDate, defaultTags, loadAttachments]);
 
   const addPaths = useCallback(
     async (paths: string[]) => {
