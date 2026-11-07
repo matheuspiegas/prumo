@@ -227,6 +227,15 @@ export function SettingsView() {
               </div>
               <Switch id="auto" checked={form.autoApprove} onCheckedChange={(c) => patch({ autoApprove: c })} />
             </div>
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-0.5">
+                <Label htmlFor="reminders">Lembretes com notificação</Label>
+                <p className="text-xs text-muted-foreground">
+                  Avisa no horário das tarefas que têm hora definida.
+                </p>
+              </div>
+              <Switch id="reminders" checked={form.reminders} onCheckedChange={(c) => patch({ reminders: c })} />
+            </div>
           </Section>
 
           <Section title="Claude" hint="Interpreta o que você disse (título e data) usando a CLI do Claude Code, com a sua assinatura.">

@@ -18,6 +18,7 @@ import { DatePicker } from "@/components/date-picker";
 import { PrioritySelect } from "@/components/priority-select";
 import { SubtasksList } from "@/components/subtasks-list";
 import { RecurrenceSelect } from "@/components/recurrence-select";
+import { TimeField } from "@/components/time-field";
 import { api, baseName, formatSize, type Attachment, type Task } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +37,7 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
   const [date, setDate] = useState<string | null>(null);
   const [priority, setPriority] = useState(0);
   const [recurrence, setRecurrence] = useState<string | null>(null);
+  const [time, setTime] = useState<string | null>(null);
   const [saved, setSaved] = useState<Attachment[]>([]);
   const [pending, setPending] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -49,6 +51,7 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
     setDate(task ? task.due : defaultDate);
     setPriority(task?.priority ?? 0);
     setRecurrence(task?.recurrence ?? null);
+    setTime(task?.dueTime ?? null);
     setPending([]);
     setSaved([]);
     if (task) loadAttachments(task.id).catch((e) => toast.error(String(e)));
@@ -110,10 +113,12 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
         await api.update(task.id, t, notes, date);
         if (priority !== task.priority) await api.setPriority(task.id, priority);
         if (recurrence !== (task.recurrence ?? null)) await api.setRecurrence(task.id, recurrence);
+        if (time !== (task.dueTime ?? null)) await api.setTime(task.id, time);
       } else {
         const id = await api.add(t, notes, date);
         if (priority) await api.setPriority(id, priority);
         if (recurrence) await api.setRecurrence(id, recurrence);
+        if (time) await api.setTime(id, time);
         for (const p of pending) await api.attach(id, p);
       }
       onSaved();
@@ -152,7 +157,10 @@ export function TaskDialog({ open, task, defaultDate, onClose, onSaved }: Props)
           />
           <div className="flex flex-col gap-1.5">
             <Label>Data</Label>
-            <DatePicker value={date} onChange={setDate} />
+            <div className="flex flex-wrap items-center gap-2">
+              <DatePicker value={date} onChange={setDate} />
+              <TimeField value={time} onChange={setTime} />
+            </div>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Prioridade</Label>

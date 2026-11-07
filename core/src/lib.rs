@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 mod overdue; // atrasadas, reagendar e prioridade
 pub mod recurrence; // recorrência de tarefas
 mod reminders; // lembretes com hora (due_time / reminded_at)
+pub use reminders::parse_hhmm;
 mod search; // busca
 mod subtasks; // subtarefas (parent_id)
 mod tags; // etiquetas (tags / task_tags)
@@ -284,7 +285,9 @@ impl Db {
 
     pub fn update_task(&self, id: i64, title: &str, notes: &str, due_date: Option<&str>) -> Result<()> {
         self.conn.execute(
-            "UPDATE tasks SET title = ?2, notes = ?3, due_date = ?4, updated_at = datetime('now') WHERE id = ?1",
+            "UPDATE tasks SET title = ?2, notes = ?3, due_date = ?4,
+             reminded_at = CASE WHEN due_date IS NOT ?4 THEN NULL ELSE reminded_at END,
+             updated_at = datetime('now') WHERE id = ?1",
             params![id, title, notes, due_date],
         )?;
         Ok(())

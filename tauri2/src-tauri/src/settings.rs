@@ -19,6 +19,8 @@ pub struct Settings {
     pub shortcut: String,
     /// Atalho global que abre a janelinha de tarefa rápida.
     pub quick_add_shortcut: String,
+    /// Notificações nativas para tarefas com hora.
+    pub reminders: bool,
 }
 
 /// Alt+Space no Windows abre o menu do sistema (e conflita com o PowerToys Run).
@@ -36,6 +38,7 @@ impl Default for Settings {
             auto_approve: false,
             shortcut: "CommandOrControl+Shift+Space".into(),
             quick_add_shortcut: default_quick_add_shortcut().into(),
+            reminders: true,
         }
     }
 }

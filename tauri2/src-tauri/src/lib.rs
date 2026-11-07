@@ -2,6 +2,7 @@ mod audio;
 mod interpret;
 mod logging;
 mod quickadd;
+mod reminders;
 mod settings;
 mod stt;
 mod tray;
@@ -303,6 +304,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::show_main(app)))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -329,6 +331,7 @@ pub fn run() {
                 plog!("atalhos: {e}");
             }
             tray::setup(app.handle())?;
+            reminders::start(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -381,7 +384,7 @@ pub fn run() {
             dates,
             open_logs,
             quickadd::quick_add_task,
-            voice::voice_start,
+            reminders::set_task_time,            voice::voice_start,
             voice::voice_stop,
             voice::voice_cancel,
             voice::get_settings,

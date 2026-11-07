@@ -32,6 +32,7 @@ export type Settings = {
   autoApprove: boolean;
   shortcut: string;
   quickAddShortcut: string;
+  reminders: boolean;
 };
 export type ModelInfo = {
   id: string;
@@ -96,7 +97,9 @@ export const api = {
   subtasks: (parentId: number) => invoke<Task[]>("list_subtasks", { parentId }),
   renameSubtask: (id: number, title: string) => invoke<void>("rename_subtask", { id, title }),
   reorderSubtasks: (parentId: number, ids: number[]) => invoke<void>("reorder_subtasks", { parentId, ids }),
-  quickAdd: (title: string, date: string | null) => invoke<number>("quick_add_task", { title, date }),
+  quickAdd: (title: string, date: string | null, time: string | null = null) =>
+    invoke<number>("quick_add_task", { title, date, time }),
+  setTime: (id: number, time: string | null) => invoke<void>("set_task_time", { id, time }),
   openLogs: () => invoke<string>("open_logs"),
   voiceStart: () => invoke<void>("voice_start"),
   voiceStop: () => invoke<VoiceResult>("voice_stop"),
