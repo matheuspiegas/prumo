@@ -1,38 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { open as pickFiles } from "@tauri-apps/plugin-dialog";
-import { FileText, Loader2, Paperclip, Plus, Upload, X } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import { toast } from "sonner";
+import { lazy, Suspense, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
+import { motion } from "motion/react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { TagInput } from "@/components/tag-input";
-import { DatePicker } from "@/components/date-picker";
-import { PrioritySelect } from "@/components/priority-select";
 import { SubtasksList } from "@/components/subtasks-list";
-import { RecurrenceSelect } from "@/components/recurrence-select";
-import { TimeField } from "@/components/time-field";
-import { api, baseName, formatSize, imageMime, type Attachment, type Task } from "@/lib/api";
-import {
-  ImageThumb,
-  imageMarker,
-  MAX_IMAGE_BYTES,
-  newImageName,
-  PASTE_TYPES,
-  SavedImageThumb,
-  stripImageMarker,
-} from "@/components/note-images";
+import { TaskAttachments } from "@/components/task-attachments";
+import { TaskProperties } from "@/components/task-properties";
+import type { NotesEditorHandle } from "@/components/notes-editor/notes-editor";
+import type { NoteImage } from "@/components/notes-editor/image-context";
+import { useExpandedLayout } from "@/hooks/use-expanded-layout";
+import { useTaskForm } from "@/hooks/use-task-form";
+import { imageMime, type Task } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { DUR_BASE, DUR_FAST, easeOut } from "@/lib/motion";
+
+/** O editor (Tiptap) só é carregado ao abrir uma tarefa, para o app iniciar leve. */
+const NotesEditor = lazy(() => import("@/components/notes-editor/notes-editor").then((m) => ({ default: m.NotesEditor })));
 
 /** Campos do formulário entram em cascata curta (25 ms) ao abrir. */
 const formVariants = { hidden: {}, show: { transition: { staggerChildren: 0.025, delayChildren: 0.04 } } };
@@ -40,15 +24,6 @@ const fieldVariants = {
   hidden: { opacity: 0, y: 6 },
   show: { opacity: 1, y: 0, transition: { duration: DUR_BASE, ease: easeOut } },
 };
-/** Item de anexo: altura + fade ao entrar/sair. */
-const itemMotion = {
-  initial: { opacity: 0, height: 0 },
-  animate: { opacity: 1, height: "auto", transition: { duration: DUR_BASE, ease: easeOut } },
-  exit: { opacity: 0, height: 0, transition: { duration: DUR_FAST } },
-} as const;
-
-/** Imagem colada numa tarefa nova: fica em memória até a tarefa ser criada (ainda não há id). */
-type PastedImage = { name: string; bytes: ArrayBuffer; url: string };
 
 type Props = {
   open: boolean;
@@ -61,208 +36,108 @@ type Props = {
   onSaved: () => void;
 };
 
+/**
+ * Diálogo de criar/editar tarefa. Dois layouts sobre o mesmo estado: compacto (janela padrão, tudo em
+ * uma coluna) e expandido (janela grande: editor amplo à esquerda e propriedades à direita).
+ */
 export function TaskDialog({ open, task, defaultDate, defaultTags, onClose, onSaved }: Props) {
-  const [title, setTitle] = useState("");
-  const [notes, setNotes] = useState("");
-  const [date, setDate] = useState<string | null>(null);
-  const [priority, setPriority] = useState(0);
-  const [recurrence, setRecurrence] = useState<string | null>(null);
-  const [time, setTime] = useState<string | null>(null);
-  const [saved, setSaved] = useState<Attachment[]>([]);
-  const [pending, setPending] = useState<string[]>([]);
-  const [dragging, setDragging] = useState(false);
-  const [tags, setTags] = useState<string[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [pastedImgs, setPastedImgs] = useState<PastedImage[]>([]);
-  const pastedRef = useRef<PastedImage[]>([]);
-  pastedRef.current = pastedImgs;
+  const f = useTaskForm({ open, task, defaultDate, defaultTags, onClose, onSaved });
+  const expanded = useExpandedLayout();
+  const editorRef = useRef<NotesEditorHandle>(null);
+  const [confirmClose, setConfirmClose] = useState(false);
 
-  const loadAttachments = useCallback(async (id: number) => setSaved(await api.attachments(id)), []);
+  /** Fechar com alterações não salvas pede confirmação. */
+  const requestClose = () => (f.dirty ? setConfirmClose(true) : onClose());
 
-  // Libera as URLs das imagens em memória ao desmontar.
-  useEffect(() => () => pastedRef.current.forEach((i) => URL.revokeObjectURL(i.url)), []);
+  const insertImage = (i: NoteImage) => editorRef.current?.insertImages([{ n: i.n, name: i.name }]);
+  const removeImage = async (i: NoteImage) => {
+    editorRef.current?.removeImage({ n: i.n, name: i.name });
+    await f.removeImage({ n: i.n, name: i.name });
+  };
 
-  useEffect(() => {
-    if (!open) return;
-    pastedRef.current.forEach((i) => URL.revokeObjectURL(i.url));
-    setPastedImgs([]);
-    setTitle(task?.title ?? "");
-    setNotes(task?.notes ?? "");
-    setDate(task ? task.due : defaultDate);
-    setPriority(task?.priority ?? 0);
-    setRecurrence(task?.recurrence ?? null);
-    setTime(task?.dueTime ?? null);
-    setPending([]);
-    setSaved([]);
-    setTags(task?.tags ?? defaultTags ?? []);
-    if (task) loadAttachments(task.id).catch((e) => toast.error(String(e)));
-  }, [open, task, defaultDate, defaultTags, loadAttachments]);
-
-  const addPaths = useCallback(
-    async (paths: string[]) => {
-      if (!paths.length) return;
-      try {
-        if (task) {
-          for (const p of paths) await api.attach(task.id, p);
-          await loadAttachments(task.id);
-          onSaved();
-        } else {
-          setPending((cur) => [...cur, ...paths]);
-        }
-      } catch (e) {
-        toast.error(`Não foi possível anexar: ${e}`);
-      }
-    },
-    [task, loadAttachments, onSaved],
+  const titleInput = (
+    <Input
+      autoFocus
+      value={f.title}
+      onChange={(e) => f.setTitle(e.target.value)}
+      placeholder="O que precisa ser feito?"
+      className={cn(expanded ? "h-11 text-lg" : "h-10 text-base")}
+    />
   );
 
-  // Arrastar e soltar arquivos do Finder/Explorer (o webview entrega os caminhos).
-  const addRef = useRef(addPaths);
-  addRef.current = addPaths;
-  useEffect(() => {
-    if (!open) return;
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-    getCurrentWebview()
-      .onDragDropEvent((e) => {
-        const p = e.payload;
-        if (p.type === "enter" || p.type === "over") setDragging(true);
-        else if (p.type === "leave") setDragging(false);
-        else if (p.type === "drop") {
-          setDragging(false);
-          addRef.current(p.paths);
-        }
-      })
-      .then((fn) => (cancelled ? fn() : (unlisten = fn)));
-    return () => {
-      cancelled = true;
-      unlisten?.();
-      setDragging(false);
-    };
-  }, [open]);
+  const properties = (
+    <TaskProperties
+      layout={expanded ? "stacked" : "rows"}
+      date={f.date}
+      onDate={f.setDate}
+      time={f.time}
+      onTime={f.setTime}
+      priority={f.priority}
+      onPriority={f.setPriority}
+      recurrence={f.recurrence}
+      onRecurrence={f.setRecurrence}
+      tags={f.tags}
+      onTags={f.setTags}
+    />
+  );
 
-  /** Ctrl+V com imagem nas notas: salva como anexo e deixa um marcador no ponto do cursor. */
-  const onPasteNotes = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
-    if (!files.length) return; // colar texto segue o comportamento normal
-    e.preventDefault();
-    const el = e.currentTarget;
-    const from = el.selectionStart;
-    const to = el.selectionEnd;
+  const editor = (
+    <Suspense fallback={<div className={cn("min-h-44 animate-pulse rounded-lg border bg-muted/30", expanded && "flex-1")} />}>
+    <NotesEditor
+      // Remonta ao abrir outra tarefa e ao trocar de layout; o texto atual vem de `f.notes`.
+      key={`${f.resetKey}-${expanded}`}
+      ref={editorRef}
+      initialMarkdown={f.notes}
+      images={f.images}
+      variant={expanded ? "expanded" : "compact"}
+      onChange={f.setNotes}
+      onPasteImages={f.pasteImages}
+      onSubmit={f.save}
+      placeholder="Detalhes, links, contexto… Cole imagens com Ctrl+V."
+      className={expanded ? "flex-1" : undefined}
+    />
+    </Suspense>
+  );
 
-    const taken = new Set([...saved.map((a) => a.filename), ...pastedRef.current.map((i) => i.name)]);
-    const added: { name: string; bytes: ArrayBuffer }[] = [];
-    for (const f of files) {
-      if (!PASTE_TYPES.includes(f.type)) {
-        toast.error(`Formato de imagem não suportado (${f.type}). Use PNG, JPEG, GIF ou WebP.`);
-        continue;
-      }
-      if (f.size > MAX_IMAGE_BYTES) {
-        toast.error(`A imagem tem mais de ${MAX_IMAGE_BYTES / 1024 / 1024} MB.`);
-        continue;
-      }
-      const name = newImageName(f.type, taken);
-      taken.add(name);
-      added.push({ name, bytes: await f.arrayBuffer() });
-    }
-    if (!added.length) return;
+  const subtasks = task && <SubtasksList parentId={task.id} onChanged={onSaved} />;
 
-    try {
-      if (task) {
-        for (const a of added) await api.attachBytes(task.id, a.name, a.bytes);
-        await loadAttachments(task.id);
-        onSaved();
-      } else {
-        setPastedImgs((cur) => [
-          ...cur,
-          ...added.map((a) => ({
-            ...a,
-            url: URL.createObjectURL(new Blob([a.bytes], { type: imageMime(a.name) ?? "image/png" })),
-          })),
-        ]);
-      }
-    } catch (err) {
-      toast.error(`Não foi possível anexar a imagem: ${err}`);
-      return;
-    }
+  const attachments = (
+    <TaskAttachments
+      files={f.saved.filter((a) => !imageMime(a.filename))}
+      pending={f.pending}
+      images={f.images}
+      dragging={f.dragging}
+      onChoose={f.chooseFiles}
+      onRemoveFile={f.removeSaved}
+      onRemovePending={(p) => f.setPending((cur) => cur.filter((x) => x !== p))}
+      onInsertImage={insertImage}
+      onRemoveImage={removeImage}
+    />
+  );
 
-    const marker = added.map((a) => imageMarker(a.name)).join("\n");
-    setNotes((cur) => {
-      const a = Math.min(from, cur.length);
-      const b = Math.min(to, cur.length);
-      const before = cur.slice(0, a);
-      const after = cur.slice(b);
-      const pre = before && !before.endsWith("\n") ? "\n" : "";
-      const post = after && !after.startsWith("\n") ? "\n" : "";
-      return before + pre + marker + post + after;
-    });
-  };
+  const footer = (
+    <DialogFooter>
+      <Button type="button" variant="ghost" onClick={requestClose}>
+        Cancelar
+      </Button>
+      <motion.span whileTap={{ scale: 0.96 }} transition={{ duration: DUR_FAST }} className="inline-flex">
+        <Button type="submit" disabled={!f.title.trim() || f.saving} className="w-full">
+          {f.saving && <Loader2 className="animate-spin" data-icon="inline-start" />}
+          {task ? "Salvar" : "Criar"}
+        </Button>
+      </motion.span>
+    </DialogFooter>
+  );
 
-  const removePasted = (img: PastedImage) => {
-    URL.revokeObjectURL(img.url);
-    setPastedImgs((cur) => cur.filter((i) => i !== img));
-    setNotes((cur) => stripImageMarker(cur, img.name));
-  };
-
-  const removeSavedImage = async (a: Attachment) => {
-    try {
-      await api.detach(a.id);
-    } catch (err) {
-      toast.error(`Não foi possível remover: ${err}`);
-      return;
-    }
-    if (task) loadAttachments(task.id);
-    setNotes((cur) => stripImageMarker(cur, a.filename));
-    onSaved();
-  };
-
-  const choose = async () => {
-    const res = await pickFiles({ multiple: true });
-    if (res) addPaths(Array.isArray(res) ? res : [res]);
-  };
-
-  const save = async () => {
-    const t = title.trim();
-    if (!t || saving) return;
-    setSaving(true);
-    try {
-      if (task) {
-        await api.update(task.id, t, notes, date);
-        if (priority !== task.priority) await api.setPriority(task.id, priority);
-        if (recurrence !== (task.recurrence ?? null)) await api.setRecurrence(task.id, recurrence);
-        if (time !== (task.dueTime ?? null)) await api.setTime(task.id, time);
-        await api.setTags(task.id, tags);
-      } else {
-        const id = await api.add(t, notes, date);
-        if (priority) await api.setPriority(id, priority);
-        if (recurrence) await api.setRecurrence(id, recurrence);
-        if (time) await api.setTime(id, time);
-        for (const p of pending) await api.attach(id, p);
-        for (const img of pastedRef.current) await api.attachBytes(id, img.name, img.bytes);
-        if (tags.length) await api.setTags(id, tags);
-      }
-      onSaved();
-      onClose();
-    } catch (e) {
-      toast.error(`Não foi possível salvar: ${e}`);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const removeSaved = async (a: Attachment) => {
-    await api.detach(a.id);
-    if (task) loadAttachments(task.id);
-    onSaved();
-  };
-
-  const savedImages = saved.filter((a) => imageMime(a.filename));
-  const savedFiles = saved.filter((a) => !imageMime(a.filename));
-  const total = saved.length + pending.length + pastedImgs.length;
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      {/* Altura limitada à janela: cabeçalho e rodapé fixos, só o formulário rola. */}
-      <DialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-lg">
+    <Dialog open={open} onOpenChange={(o) => !o && requestClose()}>
+      {/* Altura limitada à janela: cabeçalho e rodapé fixos, só o miolo rola. */}
+      <DialogContent
+        className={cn(
+          "max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden",
+          expanded ? "h-[calc(100dvh-3rem)] w-[calc(100%-3rem)] sm:max-w-6xl" : "sm:max-w-2xl",
+        )}
+      >
         <DialogHeader>
           <DialogTitle>{task ? "Editar tarefa" : "Nova tarefa"}</DialogTitle>
         </DialogHeader>
@@ -273,132 +148,57 @@ export function TaskDialog({ open, task, defaultDate, defaultTags, onClose, onSa
           className="flex min-h-0 flex-col gap-4"
           onSubmit={(e) => {
             e.preventDefault();
-            save();
+            f.save();
           }}
         >
-          <div className="-mx-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-1">
-          <motion.div variants={fieldVariants}>
-            <Input
-              autoFocus
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="O que precisa ser feito?"
-              className="h-10 text-base"
-            />
-          </motion.div>
-          <motion.div variants={fieldVariants} className="flex flex-col gap-1.5">
-            <Label>Data</Label>
-            <div className="flex flex-wrap items-center gap-2">
-              <DatePicker value={date} onChange={setDate} />
-              <TimeField value={time} onChange={setTime} />
-            </div>
-          </motion.div>
-          <motion.div variants={fieldVariants} className="flex flex-col gap-1.5">
-            <Label>Prioridade</Label>
-            <PrioritySelect value={priority} onChange={setPriority} />
-          </motion.div>
-          <motion.div variants={fieldVariants} className="flex flex-col gap-1.5">
-            <Label>Repetir</Label>
-            <RecurrenceSelect value={recurrence} onChange={setRecurrence} />
-          </motion.div>
-          <motion.div variants={fieldVariants} className="flex flex-col gap-1.5">
-            <Label>Tags</Label>
-            <TagInput value={tags} onChange={setTags} />
-          </motion.div>
-          <motion.div variants={fieldVariants} className="flex flex-col gap-1.5">
-            <Label htmlFor="notes">Notas</Label>
-            <Textarea
-              id="notes"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              onPaste={onPasteNotes}
-              placeholder="Detalhes, links, contexto… Cole imagens com Ctrl+V."
-              className="min-h-40 resize-y"
-            />
-            {(savedImages.length > 0 || pastedImgs.length > 0) && (
-              <div className="grid grid-cols-3 gap-2">
-                {savedImages.map((a) => (
-                  <SavedImageThumb key={`s${a.id}`} id={a.id} name={a.filename} onRemove={() => removeSavedImage(a)} />
-                ))}
-                {pastedImgs.map((img) => (
-                  <ImageThumb key={img.url} name={img.name} src={img.url} onRemove={() => removePasted(img)} />
-                ))}
+          {expanded ? (
+            <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_20rem] gap-6">
+              <div className="flex min-h-0 flex-col gap-3">
+                <motion.div variants={fieldVariants}>{titleInput}</motion.div>
+                <motion.div variants={fieldVariants} className="flex min-h-0 flex-1 flex-col">
+                  {editor}
+                </motion.div>
               </div>
-            )}
-          </motion.div>
-          {task && (
-            <motion.div variants={fieldVariants}>
-              <SubtasksList parentId={task.id} onChanged={onSaved} />
-            </motion.div>
-          )}
-          <motion.div variants={fieldVariants} className="flex flex-col gap-1.5">
-            <Label>Anexos{total > 0 && <span className="text-muted-foreground">({total})</span>}</Label>
-            <div
-              className={cn(
-                "flex flex-col rounded-lg border border-dashed p-3 transition-colors",
-                dragging && "border-primary bg-accent",
-              )}
-            >
-              <AnimatePresence initial={false}>
-                {savedFiles.length + pending.length === 0 && (
-                  <motion.p key="vazio" {...itemMotion} className="flex items-center gap-2 overflow-hidden pb-2 text-sm text-muted-foreground">
-                    <Upload className="size-4" /> Arraste arquivos aqui
-                  </motion.p>
-                )}
-                {savedFiles.map((a) => (
-                  <motion.div key={`s${a.id}`} {...itemMotion} className="overflow-hidden">
-                    <div className="flex items-center gap-2 pb-2 text-sm">
-                      <FileText className="size-4 shrink-0 text-muted-foreground" />
-                      <button
-                        type="button"
-                        className="min-w-0 flex-1 truncate text-left hover:underline"
-                        onClick={() => api.open(a.path).catch((e) => toast.error(String(e)))}
-                      >
-                        {a.filename}
-                      </button>
-                      <span className="text-xs text-muted-foreground">{formatSize(a.size)}</span>
-                      <Button type="button" size="icon-xs" variant="ghost" onClick={() => removeSaved(a)} aria-label="Remover anexo">
-                        <X />
-                      </Button>
-                    </div>
-                  </motion.div>
-                ))}
-                {pending.map((p) => (
-                  <motion.div key={`p${p}`} {...itemMotion} className="overflow-hidden">
-                    <div className="flex items-center gap-2 pb-2 text-sm">
-                      <Paperclip className="size-4 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate">{baseName(p)}</span>
-                      <Button
-                        type="button"
-                        size="icon-xs"
-                        variant="ghost"
-                        onClick={() => setPending((cur) => cur.filter((x) => x !== p))}
-                        aria-label="Remover anexo"
-                      >
-                        <X />
-                      </Button>
-                    </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-              <Button type="button" size="sm" variant="outline" className="self-start" onClick={choose}>
-                <Plus data-icon="inline-start" /> Adicionar arquivo
-              </Button>
+              <aside className="-mr-2 flex min-h-0 flex-col gap-5 overflow-y-auto py-1 pr-2">
+                <motion.div variants={fieldVariants}>{properties}</motion.div>
+                {subtasks && <motion.div variants={fieldVariants}>{subtasks}</motion.div>}
+                <motion.div variants={fieldVariants}>{attachments}</motion.div>
+              </aside>
             </div>
-          </motion.div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={onClose}>
-              Cancelar
-            </Button>
-            <motion.span whileTap={{ scale: 0.96 }} transition={{ duration: DUR_FAST }} className="inline-flex">
-              <Button type="submit" disabled={!title.trim() || saving} className="w-full">
-                {saving && <Loader2 className="animate-spin" data-icon="inline-start" />}
-                {task ? "Salvar" : "Criar"}
-              </Button>
-            </motion.span>
-          </DialogFooter>
+          ) : (
+            <div className="-mx-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-1">
+              <motion.div variants={fieldVariants}>{titleInput}</motion.div>
+              <motion.div variants={fieldVariants}>{properties}</motion.div>
+              <motion.div variants={fieldVariants}>{editor}</motion.div>
+              {subtasks && <motion.div variants={fieldVariants}>{subtasks}</motion.div>}
+              <motion.div variants={fieldVariants}>{attachments}</motion.div>
+            </div>
+          )}
+          {footer}
         </motion.form>
+
+        <Dialog open={confirmClose} onOpenChange={setConfirmClose}>
+          <DialogContent className="sm:max-w-sm" showCloseButton={false}>
+            <DialogHeader>
+              <DialogTitle>Descartar alterações?</DialogTitle>
+              <DialogDescription>Esta tarefa tem alterações que ainda não foram salvas. Se fechar agora, elas se perdem.</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" autoFocus onClick={() => setConfirmClose(false)}>
+                Continuar editando
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  setConfirmClose(false);
+                  onClose();
+                }}
+              >
+                Descartar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   );
