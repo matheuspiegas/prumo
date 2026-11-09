@@ -17,7 +17,7 @@ use crate::commands::{self, Filter, SOURCE_MCP};
 pub struct AddTaskArgs {
     /// Título da tarefa.
     pub title: String,
-    /// Notas (opcional).
+    /// Notas em markdown (opcional). O app mostra num editor markdown: títulos, listas, checklists (`- [ ] item`), tabelas, blocos de código e links funcionam. Texto livre também serve.
     pub notes: Option<String>,
     /// Data de vencimento no formato YYYY-MM-DD (opcional).
     pub due_date: Option<String>,
@@ -49,7 +49,7 @@ pub struct UpdateTaskArgs {
     pub id: i64,
     /// Novo título.
     pub title: Option<String>,
-    /// Novas notas.
+    /// Novas notas em markdown. ATENÇÃO: SUBSTITUI todas as notas existentes. Para só acrescentar, use append_task_notes.
     pub notes: Option<String>,
     /// Nova data YYYY-MM-DD; string vazia remove a data.
     pub due_date: Option<String>,
@@ -57,6 +57,22 @@ pub struct UpdateTaskArgs {
     pub tags: Option<Vec<String>>,
     /// Prioridade: 0 nenhuma, 1 baixa, 2 média, 3 alta.
     pub priority: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AppendNotesArgs {
+    /// Id da tarefa.
+    pub id: i64,
+    /// Markdown a acrescentar ao fim das notas (vai depois de uma linha em branco). Pode conter tokens de imagem como [Image #1], devolvidos por attach_image.
+    pub markdown: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AttachImageArgs {
+    /// Id da tarefa.
+    pub id: i64,
+    /// Caminho local de uma imagem png, jpg, gif ou webp (até 25 MB).
+    pub path: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -171,7 +187,7 @@ impl PrumoServer {
 
 #[tool_router]
 impl PrumoServer {
-    #[tool(description = "Cria uma tarefa. Datas sempre no formato YYYY-MM-DD. A tarefa nova vai para a CAIXA DE ENTRADA (aguarda aprovação do usuário), nunca direto para Hoje.")]
+    #[tool(description = "Cria uma tarefa. Datas sempre no formato YYYY-MM-DD. As notas aceitam markdown (o app tem um editor markdown), então use as notas para o contexto detalhado: passos, checklist, trechos de código, links. Para incluir imagens, crie a tarefa e depois use attach_image e append_task_notes. A tarefa nova vai para a CAIXA DE ENTRADA (aguarda aprovação do usuário), nunca direto para Hoje.")]
     fn add_task(&self, Parameters(a): Parameters<AddTaskArgs>) -> Result<String, ErrorData> {
         json(self.with(|db| {
             commands::add(db, SOURCE_MCP, &a.title, a.notes.as_deref(), a.due_date.as_deref(), a.tags.as_deref().unwrap_or(&[]))
@@ -206,6 +222,16 @@ impl PrumoServer {
         Ok(CallToolResult::success(content))
     }
 
+    #[tool(description = "Acrescenta markdown ao FIM das notas de uma tarefa (separado por uma linha em branco), sem apagar o que já está lá. Use para registrar plano, resultado, checklist ou contexto. Suporta markdown completo (títulos, listas, `- [ ]` checklists, tabelas, blocos de código, links) e tokens de imagem [Image #N] de attach_image.")]
+    fn append_task_notes(&self, Parameters(a): Parameters<AppendNotesArgs>) -> Result<String, ErrorData> {
+        json(self.with(|db| commands::append_notes(db, a.id, &a.markdown)))
+    }
+
+    #[tool(description = "Anexa uma imagem local (png, jpg, gif ou webp, até 25 MB) a uma tarefa e devolve o token [Image #N]. O token só aparece nas notas se você o escrever lá: coloque-o no markdown (append_task_notes ou update_task) no ponto onde a imagem deve aparecer; o app mostra a miniatura e outros agentes a veem com get_task.")]
+    fn attach_image(&self, Parameters(a): Parameters<AttachImageArgs>) -> Result<String, ErrorData> {
+        json(self.with(|db| commands::attach_image(db, a.id, std::path::Path::new(&a.path), &tarefas_core::data_dir().join("attachments"))))
+    }
+
     #[tool(description = "Marca uma tarefa como concluída pelo id.")]
     fn complete_task(&self, Parameters(a): Parameters<IdArgs>) -> Result<String, ErrorData> {
         json(self.with(|db| commands::complete(db, a.id)))
@@ -216,7 +242,7 @@ impl PrumoServer {
         json(self.with(|db| commands::search(db, &a.query)))
     }
 
-    #[tool(description = "Atualiza campos de uma tarefa (só os informados). due_date em YYYY-MM-DD (string vazia remove). Não move a tarefa para Hoje: a aprovação da caixa de entrada é do usuário.")]
+    #[tool(description = "Atualiza campos de uma tarefa (só os informados). due_date em YYYY-MM-DD (string vazia remove). Atenção: notes SUBSTITUI as notas inteiras, inclusive o que o usuário escreveu; leia antes com get_task e prefira append_task_notes para acrescentar. Não move a tarefa para Hoje: a aprovação da caixa de entrada é do usuário.")]
     fn update_task(&self, Parameters(a): Parameters<UpdateTaskArgs>) -> Result<String, ErrorData> {
         json(self.with(|db| {
             commands::update(db, a.id, a.title.as_deref(), a.notes.as_deref(), a.due_date.as_deref(), a.tags.as_deref(), a.priority)

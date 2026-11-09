@@ -62,7 +62,7 @@ Para o Claude Code usar o Prumo como servidor MCP (o app mostra o comando pronto
 claude mcp add prumo -- /caminho/para/prumo-cli mcp
 ```
 
-Tools: `add_task`, `list_tasks`, `get_task`, `complete_task`, `search_tasks`, `update_task`, `add_subtask`, `list_tags`. Defina `PRUMO_DATA_DIR` para usar outro banco.
+Tools: `add_task`, `list_tasks`, `get_task`, `complete_task`, `search_tasks`, `update_task`, `append_task_notes`, `attach_image`, `add_subtask`, `list_tags`. Defina `PRUMO_DATA_DIR` para usar outro banco.
 
 ### Notas em markdown e imagens
 
@@ -76,6 +76,11 @@ pasta de dados) e deixa o token `[Image #N]` no texto, que o editor mostra como 
 caminho. A tool `get_task` devolve o texto da tarefa e embute as imagens na resposta, rotuladas com o mesmo número
 (até 5 por chamada, 5 MB cada); as que passam do limite vão só com o caminho, que o agente abre com a ferramenta de
 leitura de arquivos. Depois de atualizar o Prumo, reinicie a sessão do agente para ele enxergar a tool nova.
+
+O agente também escreve nas notas: `add_task` e `update_task` aceitam markdown em `notes` (`update_task` substitui
+tudo), `append_task_notes` acrescenta ao fim sem apagar o que você escreveu, e `attach_image` anexa uma imagem local
+(png, jpg, gif ou webp, até 25 MB, conferida pela assinatura do arquivo) e devolve o token `[Image #N]` para o agente
+colocar no texto.
 
 Testes do front: `cd tauri2 && npm test`.
 

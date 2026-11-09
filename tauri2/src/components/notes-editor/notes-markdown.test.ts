@@ -65,6 +65,17 @@ describe("ida e volta do markdown das notas", () => {
     }
   });
 
+  it("abre direito uma nota típica escrita por agente (plano, checklist, código e imagem)", () => {
+    const md = "## Plano\n\n- [ ] passo 1\n- [ ] passo 2\n\n```rust\nfn main() {}\n```\n\nResultado do print:\n\n[Image #1]";
+    const types = nodeTypes(md);
+    for (const t of ["heading", "taskList", "taskItem", "codeBlock", "imageToken"]) expect(types).toContain(t);
+    const out = roundtrip(md);
+    expect(out).toContain("## Plano");
+    expect(out).toContain("- [ ] passo 1");
+    expect(out).toContain("fn main() {}");
+    expect(out.endsWith("[Image #1]")).toBe(true);
+  });
+
   it("lê tabelas", () => {
     const md = "| a | b |\n| --- | --- |\n| 1 | 2 |";
     expect(nodeTypes(md)).toContain("table");

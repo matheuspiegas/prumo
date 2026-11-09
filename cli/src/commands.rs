@@ -1,6 +1,8 @@
 //! Camada de comandos: opera sobre um `Db` e devolve dados serializáveis.
 //! Regra de produto: tudo que o CLI/MCP cria entra na CAIXA DE ENTRADA.
 
+use std::path::Path;
+
 use serde::Serialize;
 use tarefas_core::{Db, Task};
 
@@ -228,6 +230,77 @@ pub fn update(
     view(db, db.get_task(id).map_err(e)?)
 }
 
+/// Acrescenta markdown ao fim das notas, separado por uma linha em branco, sem tocar no que já existe.
+pub fn append_notes(db: &Db, id: i64, markdown: &str) -> Result<TaskView> {
+    let cur = live(db, id)?;
+    let md = markdown.trim();
+    if md.is_empty() {
+        return Err("o texto a acrescentar está vazio".into());
+    }
+    let notes = if cur.notes.trim().is_empty() {
+        md.to_string()
+    } else {
+        format!("{}\n\n{md}", cur.notes.trim_end())
+    };
+    db.update_task(id, &cur.title, &notes, cur.due_date.as_deref()).map_err(e)?;
+    view(db, db.get_task(id).map_err(e)?)
+}
+
+/// Tamanho máximo de uma imagem anexada por agente (bate com o limite do app).
+pub const MAX_ATTACH_IMAGE_BYTES: u64 = 25 * 1024 * 1024;
+
+/// Resultado de `attach_image`: o `token` é o texto a colocar nas notas.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct AttachedImage {
+    pub token: String,
+    pub filename: String,
+    pub path: String,
+    pub size: i64,
+}
+
+/// Confere os primeiros bytes: o conteúdo precisa ser mesmo do tipo que a extensão diz.
+fn has_image_signature(b: &[u8], mime: &str) -> bool {
+    match mime {
+        "image/png" => b.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]),
+        "image/jpeg" => b.starts_with(&[0xFF, 0xD8, 0xFF]),
+        "image/gif" => b.starts_with(b"GIF87a") || b.starts_with(b"GIF89a"),
+        "image/webp" => b.len() >= 12 && &b[0..4] == b"RIFF" && &b[8..12] == b"WEBP",
+        _ => false,
+    }
+}
+
+/// Copia uma imagem local como anexo `image-N.ext` da tarefa e devolve o token `[Image #N]`.
+/// Só aceita png, jpg, gif e webp de verdade (extensão e assinatura do arquivo), até 25 MB.
+pub fn attach_image(db: &Db, id: i64, source: &Path, attachments_dir: &Path) -> Result<AttachedImage> {
+    live(db, id)?;
+    let name = source.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let mime = tarefas_core::image_mime(name).ok_or("só imagens png, jpg, gif ou webp são aceitas")?;
+    let meta = std::fs::metadata(source).map_err(|er| format!("não foi possível ler {}: {er}", source.display()))?;
+    if !meta.is_file() {
+        return Err(format!("{} não é um arquivo", source.display()));
+    }
+    if meta.len() == 0 || meta.len() > MAX_ATTACH_IMAGE_BYTES {
+        return Err(format!("a imagem precisa ter entre 1 byte e {} MB", MAX_ATTACH_IMAGE_BYTES / 1024 / 1024));
+    }
+    let bytes = std::fs::read(source).map_err(|er| format!("não foi possível ler {}: {er}", source.display()))?;
+    if !has_image_signature(&bytes, mime) {
+        return Err("o conteúdo do arquivo não corresponde a uma imagem do tipo indicado pela extensão".into());
+    }
+    let n = db
+        .attachments(id)
+        .map_err(e)?
+        .iter()
+        .filter_map(|a| tarefas_core::image_number(&a.filename))
+        .max()
+        .unwrap_or(0)
+        + 1;
+    let ext = name.rsplit('.').next().unwrap_or("png").to_ascii_lowercase();
+    let filename = format!("image-{n}.{ext}");
+    let row = db.add_attachment_bytes(id, &filename, &bytes, attachments_dir).map_err(|er| er.to_string())?;
+    let att = db.attachment(row).map_err(e)?;
+    Ok(AttachedImage { token: format!("[Image #{n}]"), filename: att.filename, path: att.stored_path, size: att.size })
+}
+
 pub fn add_subtask(db: &Db, parent_id: i64, title: &str) -> Result<TaskView> {
     live(db, parent_id)?;
     let id = db.add_subtask(parent_id, title).map_err(e)?;
@@ -379,6 +452,68 @@ mod tests {
         assert!(txt.contains("[Image #1] -> image-1.png") && txt.contains("reproduzir") && txt.contains("log.txt"));
         assert!(show(&db, 9999).is_err());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn append_notes_keeps_existing_text() {
+        let db = Db::open_in_memory().unwrap();
+        let t = add(&db, SOURCE_MCP, "Revisar", None, None, &[]).unwrap();
+        let a = append_notes(&db, t.id, "  ## Contexto\n\n- [ ] item  \n").unwrap();
+        assert_eq!(a.notes, "## Contexto\n\n- [ ] item");
+        let b = append_notes(&db, t.id, "Mais um parágrafo").unwrap();
+        assert_eq!(b.notes, "## Contexto\n\n- [ ] item\n\nMais um parágrafo");
+        assert_eq!(b.title, "Revisar");
+        assert!(append_notes(&db, t.id, "   \n ").is_err());
+        assert!(append_notes(&db, 9999, "x").is_err());
+    }
+
+    /// PNG mínimo: a assinatura basta para o teste.
+    const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
+
+    #[test]
+    fn attach_image_numbers_and_validates() {
+        let db = Db::open_in_memory().unwrap();
+        let t = add(&db, SOURCE_MCP, "Com print", None, None, &[]).unwrap();
+        let dir = std::env::temp_dir().join(format!("prumo-attach-img-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ok = dir.join("captura.PNG");
+        std::fs::write(&ok, PNG).unwrap();
+        let store = dir.join("anexos");
+
+        let a = attach_image(&db, t.id, &ok, &store).unwrap();
+        assert_eq!((a.token.as_str(), a.filename.as_str()), ("[Image #1]", "image-1.png"));
+        assert_eq!(std::fs::read(&a.path).unwrap(), PNG);
+        let b = attach_image(&db, t.id, &ok, &store).unwrap();
+        assert_eq!(b.token, "[Image #2]");
+        // a imagem aparece na visão da tarefa com o mesmo token
+        let d = show(&db, t.id).unwrap();
+        assert_eq!(d.task.attachments.iter().filter_map(|x| x.token.clone()).collect::<Vec<_>>(), ["[Image #1]", "[Image #2]"]);
+
+        // extensão que não é imagem, conteúdo que não bate, vazio, inexistente, pasta, tarefa inexistente
+        let txt = dir.join("nota.txt");
+        std::fs::write(&txt, "oi").unwrap();
+        assert!(attach_image(&db, t.id, &txt, &store).is_err());
+        let fake = dir.join("falsa.png");
+        std::fs::write(&fake, "isto não é um png").unwrap();
+        assert!(attach_image(&db, t.id, &fake, &store).unwrap_err().contains("não corresponde"));
+        let empty = dir.join("vazia.png");
+        std::fs::write(&empty, b"").unwrap();
+        assert!(attach_image(&db, t.id, &empty, &store).is_err());
+        assert!(attach_image(&db, t.id, &dir.join("nao-existe.png"), &store).is_err());
+        assert!(attach_image(&db, t.id, &dir, &store).is_err());
+        assert!(attach_image(&db, 9999, &ok, &store).is_err());
+        assert_eq!(show(&db, t.id).unwrap().task.attachments.len(), 2);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn image_signatures() {
+        assert!(has_image_signature(b"\xFF\xD8\xFF\xE0xx", "image/jpeg"));
+        assert!(has_image_signature(b"GIF89a....", "image/gif"));
+        assert!(has_image_signature(b"RIFF\0\0\0\0WEBPVP8 ", "image/webp"));
+        assert!(!has_image_signature(b"RIFF\0\0\0\0WAVEfmt ", "image/webp"));
+        assert!(!has_image_signature(PNG, "image/jpeg"));
+        assert!(!has_image_signature(PNG, "text/plain"));
     }
 
     #[test]
