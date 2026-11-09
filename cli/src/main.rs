@@ -42,6 +42,8 @@ enum Cmd {
         #[arg(long, group = "f")]
         overdue: bool,
     },
+    /// Mostra uma tarefa com notas, subtarefas e o caminho dos anexos (imagens)
+    Show { id: i64 },
     /// Conclui uma tarefa
     Done { id: i64 },
     /// Busca tarefas
@@ -90,6 +92,10 @@ fn run(cli: Cli) -> Result<(), String> {
             };
             let ts = commands::list(&db, f)?;
             out(j, &ts, || commands::render_tasks(&ts));
+        }
+        Cmd::Show { id } => {
+            let d = commands::show(&db, id)?;
+            out(j, &d, || commands::render_detail(&d));
         }
         Cmd::Done { id } => {
             let t = commands::complete(&db, id)?;
