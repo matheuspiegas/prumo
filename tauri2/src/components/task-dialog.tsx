@@ -21,7 +21,16 @@ import { PrioritySelect } from "@/components/priority-select";
 import { SubtasksList } from "@/components/subtasks-list";
 import { RecurrenceSelect } from "@/components/recurrence-select";
 import { TimeField } from "@/components/time-field";
-import { api, baseName, formatSize, type Attachment, type Task } from "@/lib/api";
+import { api, baseName, formatSize, imageMime, type Attachment, type Task } from "@/lib/api";
+import {
+  ImageThumb,
+  imageMarker,
+  MAX_IMAGE_BYTES,
+  newImageName,
+  PASTE_TYPES,
+  SavedImageThumb,
+  stripImageMarker,
+} from "@/components/note-images";
 import { cn } from "@/lib/utils";
 import { DUR_BASE, DUR_FAST, easeOut } from "@/lib/motion";
 
@@ -37,6 +46,9 @@ const itemMotion = {
   animate: { opacity: 1, height: "auto", transition: { duration: DUR_BASE, ease: easeOut } },
   exit: { opacity: 0, height: 0, transition: { duration: DUR_FAST } },
 } as const;
+
+/** Imagem colada numa tarefa nova: fica em memória até a tarefa ser criada (ainda não há id). */
+type PastedImage = { name: string; bytes: ArrayBuffer; url: string };
 
 type Props = {
   open: boolean;
@@ -61,11 +73,19 @@ export function TaskDialog({ open, task, defaultDate, defaultTags, onClose, onSa
   const [dragging, setDragging] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [pastedImgs, setPastedImgs] = useState<PastedImage[]>([]);
+  const pastedRef = useRef<PastedImage[]>([]);
+  pastedRef.current = pastedImgs;
 
   const loadAttachments = useCallback(async (id: number) => setSaved(await api.attachments(id)), []);
 
+  // Libera as URLs das imagens em memória ao desmontar.
+  useEffect(() => () => pastedRef.current.forEach((i) => URL.revokeObjectURL(i.url)), []);
+
   useEffect(() => {
     if (!open) return;
+    pastedRef.current.forEach((i) => URL.revokeObjectURL(i.url));
+    setPastedImgs([]);
     setTitle(task?.title ?? "");
     setNotes(task?.notes ?? "");
     setDate(task ? task.due : defaultDate);
@@ -121,6 +141,81 @@ export function TaskDialog({ open, task, defaultDate, defaultTags, onClose, onSa
     };
   }, [open]);
 
+  /** Ctrl+V com imagem nas notas: salva como anexo e deixa um marcador no ponto do cursor. */
+  const onPasteNotes = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
+    if (!files.length) return; // colar texto segue o comportamento normal
+    e.preventDefault();
+    const el = e.currentTarget;
+    const from = el.selectionStart;
+    const to = el.selectionEnd;
+
+    const taken = new Set([...saved.map((a) => a.filename), ...pastedRef.current.map((i) => i.name)]);
+    const added: { name: string; bytes: ArrayBuffer }[] = [];
+    for (const f of files) {
+      if (!PASTE_TYPES.includes(f.type)) {
+        toast.error(`Formato de imagem não suportado (${f.type}). Use PNG, JPEG, GIF ou WebP.`);
+        continue;
+      }
+      if (f.size > MAX_IMAGE_BYTES) {
+        toast.error(`A imagem tem mais de ${MAX_IMAGE_BYTES / 1024 / 1024} MB.`);
+        continue;
+      }
+      const name = newImageName(f.type, taken);
+      taken.add(name);
+      added.push({ name, bytes: await f.arrayBuffer() });
+    }
+    if (!added.length) return;
+
+    try {
+      if (task) {
+        for (const a of added) await api.attachBytes(task.id, a.name, a.bytes);
+        await loadAttachments(task.id);
+        onSaved();
+      } else {
+        setPastedImgs((cur) => [
+          ...cur,
+          ...added.map((a) => ({
+            ...a,
+            url: URL.createObjectURL(new Blob([a.bytes], { type: imageMime(a.name) ?? "image/png" })),
+          })),
+        ]);
+      }
+    } catch (err) {
+      toast.error(`Não foi possível anexar a imagem: ${err}`);
+      return;
+    }
+
+    const marker = added.map((a) => imageMarker(a.name)).join("\n");
+    setNotes((cur) => {
+      const a = Math.min(from, cur.length);
+      const b = Math.min(to, cur.length);
+      const before = cur.slice(0, a);
+      const after = cur.slice(b);
+      const pre = before && !before.endsWith("\n") ? "\n" : "";
+      const post = after && !after.startsWith("\n") ? "\n" : "";
+      return before + pre + marker + post + after;
+    });
+  };
+
+  const removePasted = (img: PastedImage) => {
+    URL.revokeObjectURL(img.url);
+    setPastedImgs((cur) => cur.filter((i) => i !== img));
+    setNotes((cur) => stripImageMarker(cur, img.name));
+  };
+
+  const removeSavedImage = async (a: Attachment) => {
+    try {
+      await api.detach(a.id);
+    } catch (err) {
+      toast.error(`Não foi possível remover: ${err}`);
+      return;
+    }
+    if (task) loadAttachments(task.id);
+    setNotes((cur) => stripImageMarker(cur, a.filename));
+    onSaved();
+  };
+
   const choose = async () => {
     const res = await pickFiles({ multiple: true });
     if (res) addPaths(Array.isArray(res) ? res : [res]);
@@ -143,6 +238,7 @@ export function TaskDialog({ open, task, defaultDate, defaultTags, onClose, onSa
         if (recurrence) await api.setRecurrence(id, recurrence);
         if (time) await api.setTime(id, time);
         for (const p of pending) await api.attach(id, p);
+        for (const img of pastedRef.current) await api.attachBytes(id, img.name, img.bytes);
         if (tags.length) await api.setTags(id, tags);
       }
       onSaved();
@@ -160,10 +256,13 @@ export function TaskDialog({ open, task, defaultDate, defaultTags, onClose, onSa
     onSaved();
   };
 
-  const total = saved.length + pending.length;
+  const savedImages = saved.filter((a) => imageMime(a.filename));
+  const savedFiles = saved.filter((a) => !imageMime(a.filename));
+  const total = saved.length + pending.length + pastedImgs.length;
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-lg">
+      {/* Altura limitada à janela: cabeçalho e rodapé fixos, só o formulário rola. */}
+      <DialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{task ? "Editar tarefa" : "Nova tarefa"}</DialogTitle>
         </DialogHeader>
@@ -171,12 +270,13 @@ export function TaskDialog({ open, task, defaultDate, defaultTags, onClose, onSa
           variants={formVariants}
           initial="hidden"
           animate="show"
-          className="flex flex-col gap-4"
+          className="flex min-h-0 flex-col gap-4"
           onSubmit={(e) => {
             e.preventDefault();
             save();
           }}
         >
+          <div className="-mx-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-1">
           <motion.div variants={fieldVariants}>
             <Input
               autoFocus
@@ -211,9 +311,20 @@ export function TaskDialog({ open, task, defaultDate, defaultTags, onClose, onSa
               id="notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Detalhes, links, contexto…"
-              className="min-h-24"
+              onPaste={onPasteNotes}
+              placeholder="Detalhes, links, contexto… Cole imagens com Ctrl+V."
+              className="min-h-40 resize-y"
             />
+            {(savedImages.length > 0 || pastedImgs.length > 0) && (
+              <div className="grid grid-cols-3 gap-2">
+                {savedImages.map((a) => (
+                  <SavedImageThumb key={`s${a.id}`} id={a.id} name={a.filename} onRemove={() => removeSavedImage(a)} />
+                ))}
+                {pastedImgs.map((img) => (
+                  <ImageThumb key={img.url} name={img.name} src={img.url} onRemove={() => removePasted(img)} />
+                ))}
+              </div>
+            )}
           </motion.div>
           {task && (
             <motion.div variants={fieldVariants}>
@@ -229,12 +340,12 @@ export function TaskDialog({ open, task, defaultDate, defaultTags, onClose, onSa
               )}
             >
               <AnimatePresence initial={false}>
-                {total === 0 && (
+                {savedFiles.length + pending.length === 0 && (
                   <motion.p key="vazio" {...itemMotion} className="flex items-center gap-2 overflow-hidden pb-2 text-sm text-muted-foreground">
                     <Upload className="size-4" /> Arraste arquivos aqui
                   </motion.p>
                 )}
-                {saved.map((a) => (
+                {savedFiles.map((a) => (
                   <motion.div key={`s${a.id}`} {...itemMotion} className="overflow-hidden">
                     <div className="flex items-center gap-2 pb-2 text-sm">
                       <FileText className="size-4 shrink-0 text-muted-foreground" />
@@ -275,6 +386,7 @@ export function TaskDialog({ open, task, defaultDate, defaultTags, onClose, onSa
               </Button>
             </div>
           </motion.div>
+          </div>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose}>
               Cancelar

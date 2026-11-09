@@ -23,6 +23,14 @@ export type Task = {
   tags: string[];
 };
 export type Attachment = { id: number; filename: string; path: string; size: number };
+/** Tipo MIME de imagens que o app sabe mostrar (pela extensão); `null` nos demais arquivos. */
+export function imageMime(filename: string): string | null {
+  const ext = filename.split(".").pop()?.toLowerCase();
+  return (
+    { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" } as Record<string, string>
+  )[ext ?? ""] ?? null;
+}
+
 export type TagCount = { name: string; count: number };
 export type Counts = { today: number; tomorrow: number; inbox: number };
 
@@ -96,6 +104,13 @@ export const api = {
   emptyTrash: () => invoke<number>("empty_trash"),
   attachments: (taskId: number) => invoke<Attachment[]>("list_attachments", { taskId }),
   attach: (taskId: number, path: string) => invoke<number>("add_attachment", { taskId, path }),
+  /** Grava uma imagem colada (bytes crus, sem base64) como anexo da tarefa. */
+  attachBytes: (taskId: number, filename: string, bytes: ArrayBuffer) =>
+    invoke<number>("add_attachment_bytes", bytes, {
+      headers: { "x-task-id": String(taskId), "x-filename": filename },
+    }),
+  /** Bytes de um anexo (para miniaturas). */
+  readAttachment: (id: number) => invoke<ArrayBuffer>("read_attachment", { id }),
   detach: (id: number) => invoke<void>("delete_attachment", { id }),
   open: (path: string) => invoke<void>("open_attachment", { path }),
   tags: () => invoke<TagCount[]>("list_tags"),

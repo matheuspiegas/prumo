@@ -51,6 +51,7 @@ Testes do `core`: `cd core && cargo test`.
 cd cli && cargo build --release   # ou: npm run prepare-cli, em tauri2/
 prumo-cli add "revisar PR" --due amanhã --tag trabalho
 prumo-cli list --inbox          # também: --today, --tomorrow, --all, --done, --overdue
+prumo-cli show 12              # notas, subtarefas e o caminho das imagens coladas
 prumo-cli done 12
 prumo-cli search dentista
 ```
@@ -61,7 +62,15 @@ Para o Claude Code usar o Prumo como servidor MCP (o app mostra o comando pronto
 claude mcp add prumo -- /caminho/para/prumo-cli mcp
 ```
 
-Tools: `add_task`, `list_tasks`, `complete_task`, `search_tasks`, `update_task`, `add_subtask`, `list_tags`. Defina `PRUMO_DATA_DIR` para usar outro banco.
+Tools: `add_task`, `list_tasks`, `get_task`, `complete_task`, `search_tasks`, `update_task`, `add_subtask`, `list_tags`. Defina `PRUMO_DATA_DIR` para usar outro banco.
+
+### Imagens nas notas
+
+No diálogo da tarefa, `Ctrl+V` com uma imagem na área de transferência salva o arquivo em `attachments/`
+(dentro da pasta de dados) e deixa um marcador `![nome.png](anexo:nome.png)` no texto da nota. O banco guarda só o
+caminho. A tool `get_task` devolve o texto da tarefa e embute as imagens na resposta (até 5 por chamada, 5 MB cada);
+as que passam do limite vão só com o caminho, que o agente abre com a ferramenta de leitura de arquivos.
+Depois de atualizar o Prumo, reinicie a sessão do agente para ele enxergar a tool nova.
 
 ## Observações
 
