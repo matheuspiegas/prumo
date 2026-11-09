@@ -128,6 +128,7 @@ mod tests {
                 filename: name.into(),
                 path: path.to_string_lossy().into_owned(),
                 mime: tarefas_core::image_mime(name).map(str::to_string),
+                token: tarefas_core::image_number(name).map(|n| format!("[Image #{n}]")),
                 size: bytes.len() as i64,
             }
         };
@@ -185,7 +186,7 @@ impl PrumoServer {
         }))
     }
 
-    #[tool(description = "Mostra uma tarefa completa pelo id: título, notas, subtarefas e anexos. As imagens anexadas (por exemplo prints colados nas notas, que aparecem no texto como ![nome.png](anexo:nome.png)) vêm embutidas na resposta para você enxergá-las. Imagens acima do limite (5 por chamada, 5 MB cada) vão só com o caminho do arquivo no texto; abra-o com sua ferramenta de leitura de arquivos.")]
+    #[tool(description = "Mostra uma tarefa completa pelo id: título, notas, subtarefas e anexos. As imagens anexadas (prints colados nas notas aparecem no texto como [Image #1], [Image #2]... e cada imagem vem rotulada com o mesmo número) vêm embutidas na resposta para você enxergá-las. Imagens acima do limite (5 por chamada, 5 MB cada) vão só com o caminho do arquivo no texto; abra-o com sua ferramenta de leitura de arquivos.")]
     fn get_task(&self, Parameters(a): Parameters<IdArgs>) -> Result<CallToolResult, ErrorData> {
         let d = self.with(|db| commands::show(db, a.id)).map_err(|m| ErrorData::invalid_params(m, None))?;
         let (images, skipped) = pick_images(&d.task.attachments);
@@ -198,7 +199,8 @@ impl PrumoServer {
         }
         let mut content = vec![ContentBlock::text(text)];
         for (att, data) in images {
-            content.push(ContentBlock::text(format!("Imagem anexada: {}", att.filename)));
+            let label = att.token.as_deref().map(|t| t.trim_matches(['[', ']'])).unwrap_or(&att.filename);
+            content.push(ContentBlock::text(format!("{label} ({})", att.filename)));
             content.push(ContentBlock::image(base64_encode(&data), att.mime.clone().unwrap_or_default()));
         }
         Ok(CallToolResult::success(content))

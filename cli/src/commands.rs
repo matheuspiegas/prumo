@@ -39,6 +39,8 @@ pub struct AttachmentView {
     pub path: String,
     /// Tipo MIME quando é uma imagem (png, jpeg, gif, webp); `None` nos demais arquivos.
     pub mime: Option<String>,
+    /// Como a imagem aparece no texto das notas (`[Image #N]`); `None` se o arquivo não foi colado nas notas.
+    pub token: Option<String>,
     pub size: i64,
 }
 
@@ -103,6 +105,7 @@ fn view(db: &Db, t: Task) -> Result<TaskView> {
         .map(|a| AttachmentView {
             id: a.id,
             mime: tarefas_core::image_mime(&a.filename).map(str::to_string),
+            token: tarefas_core::image_number(&a.filename).map(|n| format!("[Image #{n}]")),
             filename: a.filename,
             path: a.stored_path,
             size: a.size,
@@ -272,7 +275,10 @@ pub fn render_detail(d: &TaskDetail) -> String {
     if !d.task.attachments.is_empty() {
         s.push_str("\n\nAnexos:");
         for a in &d.task.attachments {
-            s.push_str(&format!("\n  {} ({})", a.filename, a.path));
+            match &a.token {
+                Some(t) => s.push_str(&format!("\n  {t} -> {} ({})", a.filename, a.path)),
+                None => s.push_str(&format!("\n  {} ({})", a.filename, a.path)),
+            }
         }
     }
     s
@@ -356,19 +362,21 @@ mod tests {
     #[test]
     fn show_has_notes_subtasks_and_attachments() {
         let db = Db::open_in_memory().unwrap();
-        let t = add(&db, SOURCE_CLI, "Corrigir bug", Some("passos:\n![erro.png](anexo:erro.png)"), None, &[]).unwrap();
+        let t = add(&db, SOURCE_CLI, "Corrigir bug", Some("passos:\n[Image #1]"), None, &[]).unwrap();
         add_subtask(&db, t.id, "reproduzir").unwrap();
         let dir = std::env::temp_dir().join(format!("prumo-cli-show-{}", std::process::id()));
-        db.add_attachment_bytes(t.id, "erro.png", b"\x89PNG", &dir).unwrap();
+        db.add_attachment_bytes(t.id, "image-1.png", b"\x89PNG", &dir).unwrap();
         db.add_attachment_bytes(t.id, "log.txt", b"x", &dir).unwrap();
 
         let d = show(&db, t.id).unwrap();
         assert_eq!(d.subtasks.len(), 1);
         assert_eq!(d.task.attachments.len(), 2);
         assert_eq!(d.task.attachments[0].mime.as_deref(), Some("image/png"));
+        assert_eq!(d.task.attachments[0].token.as_deref(), Some("[Image #1]"));
+        assert_eq!(d.task.attachments[1].token, None);
         assert_eq!(d.task.attachments[1].mime, None);
         let txt = render_detail(&d);
-        assert!(txt.contains("anexo:erro.png") && txt.contains("reproduzir") && txt.contains("log.txt"));
+        assert!(txt.contains("[Image #1] -> image-1.png") && txt.contains("reproduzir") && txt.contains("log.txt"));
         assert!(show(&db, 9999).is_err());
         std::fs::remove_dir_all(&dir).ok();
     }

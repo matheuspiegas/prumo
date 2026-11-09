@@ -453,6 +453,17 @@ pub fn image_mime(filename: &str) -> Option<&'static str> {
     }
 }
 
+/// Número N de um arquivo `image-N.ext`, o nome das imagens coladas nas notas (que aparecem no texto
+/// como `[Image #N]`); `None` se o nome não segue esse padrão.
+pub fn image_number(filename: &str) -> Option<u32> {
+    let lower = filename.to_ascii_lowercase();
+    let rest = lower.strip_prefix("image-")?;
+    let (num, ext) = rest.split_once('.')?;
+    let digits = !num.is_empty() && num.bytes().all(|b| b.is_ascii_digit());
+    let ext_ok = !ext.is_empty() && ext.bytes().all(|b| b.is_ascii_alphanumeric());
+    if digits && ext_ok { num.parse().ok() } else { None }
+}
+
 /// Pasta de dados do Prumo (banco + anexos), compartilhada por app, CLI e MCP.
 /// Pode ser sobrescrita com a variável `PRUMO_DATA_DIR`.
 pub fn data_dir() -> PathBuf {
@@ -715,6 +726,11 @@ mod tests {
         assert!(db.attachment(9999).is_err());
         assert_eq!(image_mime("A.PNG"), Some("image/png"));
         assert_eq!(image_mime("nota.txt"), None);
+        assert_eq!(image_number("image-3.png"), Some(3));
+        assert_eq!(image_number("IMAGE-12.JPG"), Some(12));
+        assert_eq!(image_number("image-.png"), None);
+        assert_eq!(image_number("image-1.tar.gz"), None);
+        assert_eq!(image_number("foto.png"), None);
         std::fs::remove_dir_all(&dir).ok();
     }
 
