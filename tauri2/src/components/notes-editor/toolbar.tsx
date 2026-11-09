@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { MarkdownHelp } from "./markdown-help";
 
 function Tool({
   label,
@@ -49,7 +50,7 @@ function Tool({
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
       className={cn(
-        "inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4",
+        "inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4",
         active && "bg-accent text-foreground",
       )}
     >
@@ -100,7 +101,7 @@ function LinkTool({ editor, disabled }: { editor: Editor; disabled: boolean }) {
             disabled={disabled}
             onMouseDown={(e) => e.preventDefault()}
             className={cn(
-              "inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4",
+              "inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4",
               active && "bg-accent text-foreground",
             )}
           />
@@ -109,18 +110,27 @@ function LinkTool({ editor, disabled }: { editor: Editor; disabled: boolean }) {
         <Link2 />
       </PopoverTrigger>
       <PopoverContent align="start" className="w-72 p-2">
-        <form
-          className="flex items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            apply();
-          }}
-        >
-          <Input autoFocus value={href} onChange={(e) => setHref(e.target.value)} placeholder="https://…" className="h-8" />
-          <Button type="submit" size="sm">
+        {/* Sem <form>: o React repassa eventos de portal aos pais, e um submit aqui dispararia o
+            salvamento do formulário da tarefa (que contém este popover na árvore React). */}
+        <div className="flex items-center gap-2">
+          <Input
+            autoFocus
+            value={href}
+            onChange={(e) => setHref(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                e.stopPropagation();
+                apply();
+              }
+            }}
+            placeholder="https://…"
+            className="h-8"
+          />
+          <Button type="button" size="sm" className="cursor-pointer" onClick={apply}>
             {href.trim() ? "Aplicar" : "Remover"}
           </Button>
-        </form>
+        </div>
       </PopoverContent>
     </Popover>
   );
@@ -228,20 +238,22 @@ export function NotesToolbar({ editor, variant, source, onToggleSource }: Props)
           {s.table && !off && (
             <>
               <Sep />
-              <Button type="button" variant="ghost" size="xs" onMouseDown={(e) => e.preventDefault()} onClick={() => run().addRowAfter().run()}>
+              <Button type="button" variant="ghost" size="xs" className="cursor-pointer" onMouseDown={(e) => e.preventDefault()} onClick={() => run().addRowAfter().run()}>
                 + linha
               </Button>
-              <Button type="button" variant="ghost" size="xs" onMouseDown={(e) => e.preventDefault()} onClick={() => run().addColumnAfter().run()}>
+              <Button type="button" variant="ghost" size="xs" className="cursor-pointer" onMouseDown={(e) => e.preventDefault()} onClick={() => run().addColumnAfter().run()}>
                 + coluna
               </Button>
             </>
           )}
           <span className="flex-1" />
-          <Button type="button" variant={source ? "secondary" : "ghost"} size="xs" aria-pressed={source} onClick={onToggleSource}>
+          <Button type="button" variant={source ? "secondary" : "ghost"} size="xs" className="cursor-pointer" aria-pressed={source} onClick={onToggleSource}>
             <FileCode2 data-icon="inline-start" /> Markdown
           </Button>
         </>
       )}
+      {!full && <span className="flex-1" />}
+      <MarkdownHelp />
     </div>
   );
 }

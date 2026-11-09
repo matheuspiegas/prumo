@@ -15,6 +15,12 @@ beforeAll(() => {
   Range.prototype.getClientRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: function* () {} }) as unknown as DOMRectList;
   Range.prototype.getBoundingClientRect = () => new DOMRect();
   Element.prototype.scrollIntoView = () => {};
+  // O popover (floating-ui) mede o gatilho com ResizeObserver.
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
 });
 
 let root: Root | null = null;
@@ -127,5 +133,68 @@ describe("NotesEditor", () => {
   it("layout expandido mostra a contagem de palavras", async () => {
     const { host } = await mount({ md: "um dois três", variant: "expanded" });
     expect(host.textContent).toContain("3 palavras");
+  });
+});
+
+describe("link na barra de formatação", () => {
+  it("aplica o link com Enter sem disparar o submit do formulário que contém o editor", async () => {
+    // No app o editor fica dentro do <form> da tarefa: um submit no popover subia por ele e salvava/fechava o diálogo.
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const onChange = vi.fn();
+    const onSubmit = vi.fn((e: { preventDefault: () => void }) => e.preventDefault());
+    await act(async () => {
+      root!.render(
+        <form onSubmit={onSubmit}>
+          <NotesEditor initialMarkdown="ver palavra aqui" images={[]} variant="compact" onChange={onChange} onPasteImages={async () => []} />
+        </form>,
+      );
+    });
+    const pm = host.querySelector(".ProseMirror") as HTMLElement & { editor: { commands: { setTextSelection: (r: { from: number; to: number }) => boolean } } };
+    await act(async () => {
+      pm.editor.commands.setTextSelection({ from: 5, to: 12 }); // "palavra"
+    });
+    const trigger = host.querySelector('button[aria-label="Link"]') as HTMLButtonElement;
+    await act(async () => trigger.click());
+    const input = document.body.querySelector('input[placeholder="https://…"]') as HTMLInputElement;
+    expect(input).not.toBeNull();
+
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setter.call(input, "exemplo.com");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onChange).toHaveBeenCalled();
+    expect(onChange.mock.lastCall![0]).toBe("ver [palavra](https://exemplo.com) aqui");
+  });
+
+  it("não tem atalho nem comando de sublinhado (markdown puro)", async () => {
+    const { pm } = await mount({ md: "texto" });
+    const editor = (pm() as HTMLElement & { editor: { commands: Record<string, unknown>; getHTML: () => string } }).editor;
+    expect(editor.commands.toggleUnderline).toBeUndefined();
+  });
+
+  it("os botões da barra têm cursor de ponteiro", async () => {
+    const { host } = await mount({ md: "", variant: "expanded" });
+    const buttons = Array.from(host.querySelectorAll('[role="toolbar"] button'));
+    expect(buttons.length).toBeGreaterThan(15);
+    for (const b of buttons) expect(b.className, b.getAttribute("aria-label") ?? b.textContent ?? "").toContain("cursor-pointer");
+  });
+
+  it("tem o botão de ajuda com os atalhos do markdown", async () => {
+    const { host } = await mount({ md: "" });
+    const help = host.querySelector('button[aria-label="Atalhos do markdown"]') as HTMLButtonElement;
+    expect(help).not.toBeNull();
+    await act(async () => help.click());
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("Negrito");
+    expect(text).toContain("Digitando markdown");
+    expect(text).toContain("[Image #N]");
   });
 });

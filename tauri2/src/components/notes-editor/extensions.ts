@@ -11,6 +11,8 @@ export function noteExtensions(imageToken: AnyExtension = ImageTokenBase): AnyEx
     StarterKit.configure({
       // Links só abrem com Ctrl+clique (e fora do app); a navegação do webview nunca é usada.
       link: { openOnClick: false, autolink: true, protocols: ["http", "https", "mailto"] },
+      // Sublinhado não existe em markdown puro (viraria <u> no texto das notas).
+      underline: false,
     }),
     TaskList,
     TaskItem.configure({ nested: true }),
