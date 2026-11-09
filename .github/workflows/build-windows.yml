@@ -53,11 +53,12 @@ jobs:
         working-directory: cli
         run: cargo test
 
-      - name: Checagem de tipos do frontend
+      - name: Checagem de tipos e testes do frontend
         working-directory: tauri2
         run: |
           npm ci
           npx tsc --noEmit
+          npm test
 
   build:
     runs-on: windows-latest
