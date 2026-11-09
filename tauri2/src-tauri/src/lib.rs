@@ -354,6 +354,35 @@ fn add_attachment(db: State<AppDb>, task_id: i64, path: String) -> Result<i64, S
         .map_err(err)
 }
 
+/// Tamanho máximo de uma imagem colada (bytes).
+const MAX_PASTED_BYTES: usize = 25 * 1024 * 1024;
+
+/// Recebe os bytes crus de uma imagem colada (corpo binário da chamada, sem base64). O id da
+/// tarefa e o nome do arquivo vêm nos cabeçalhos `x-task-id` e `x-filename`.
+#[tauri::command]
+fn add_attachment_bytes(db: State<AppDb>, request: tauri::ipc::Request<'_>) -> Result<i64, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("corpo da chamada inválido".into());
+    };
+    if bytes.is_empty() || bytes.len() > MAX_PASTED_BYTES {
+        return Err(format!("a imagem precisa ter entre 1 byte e {} MB", MAX_PASTED_BYTES / 1024 / 1024));
+    }
+    let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok());
+    let task_id: i64 = header("x-task-id").and_then(|v| v.parse().ok()).ok_or("x-task-id ausente")?;
+    let filename = header("x-filename").unwrap_or("imagem.png");
+    lock(&db)?
+        .add_attachment_bytes(task_id, filename, bytes, &data_dir().join("attachments"))
+        .map_err(err)
+}
+
+/// Bytes de um anexo, para mostrar a miniatura. Procura pelo id: a interface não escolhe caminhos.
+#[tauri::command]
+fn read_attachment(db: State<AppDb>, id: i64) -> Result<tauri::ipc::Response, String> {
+    let a = lock(&db)?.attachment(id).map_err(err)?;
+    let bytes = std::fs::read(&a.stored_path).map_err(err)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 #[tauri::command]
 fn delete_attachment(db: State<AppDb>, id: i64) -> Result<(), String> {
     lock(&db)?.delete_attachment(id).map_err(err)
@@ -492,6 +521,8 @@ pub fn run() {
             search_tasks,
             list_attachments,
             add_attachment,
+            add_attachment_bytes,
+            read_attachment,
             delete_attachment,
             open_attachment,
             dates,

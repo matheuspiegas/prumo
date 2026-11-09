@@ -359,6 +359,41 @@ impl Db {
         Ok(self.conn.last_insert_rowid())
     }
 
+    /// Grava `bytes` (ex.: imagem colada da área de transferência) como arquivo em
+    /// `attachments_dir` e registra no banco. O nome é saneado: só o último componente conta.
+    pub fn add_attachment_bytes(
+        &self,
+        task_id: i64,
+        filename: &str,
+        bytes: &[u8],
+        attachments_dir: &Path,
+    ) -> std::io::Result<i64> {
+        std::fs::create_dir_all(attachments_dir)?;
+        let clean: String = filename
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or("")
+            .chars()
+            .filter(|c| !c.is_control() && !matches!(c, ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+            .collect();
+        let clean = clean.trim().trim_matches('.').to_string();
+        let filename = if clean.is_empty() { "anexo".to_string() } else { clean };
+        let mut dest: PathBuf = attachments_dir.join(format!("{task_id}-{filename}"));
+        let mut n = 1;
+        while dest.exists() {
+            dest = attachments_dir.join(format!("{task_id}-{n}-{filename}"));
+            n += 1;
+        }
+        std::fs::write(&dest, bytes)?;
+        self.conn
+            .execute(
+                "INSERT INTO attachments (task_id, filename, stored_path, size) VALUES (?1, ?2, ?3, ?4)",
+                params![task_id, filename, dest.to_string_lossy(), bytes.len() as i64],
+            )
+            .map_err(std::io::Error::other)?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
     /// Remove o anexo do banco e apaga o arquivo copiado.
     pub fn delete_attachment(&self, id: i64) -> Result<()> {
         let path: Option<String> = self
@@ -370,6 +405,23 @@ impl Db {
             std::fs::remove_file(p).ok();
         }
         Ok(())
+    }
+
+    /// Um anexo pelo id (para o app ler o arquivo sem aceitar caminhos vindos da interface).
+    pub fn attachment(&self, id: i64) -> Result<Attachment> {
+        self.conn.query_row(
+            "SELECT id, task_id, filename, stored_path, size FROM attachments WHERE id = ?1",
+            [id],
+            |r| {
+                Ok(Attachment {
+                    id: r.get(0)?,
+                    task_id: r.get(1)?,
+                    filename: r.get(2)?,
+                    stored_path: r.get(3)?,
+                    size: r.get(4)?,
+                })
+            },
+        )
     }
 
     pub fn attachments(&self, task_id: i64) -> Result<Vec<Attachment>> {
@@ -386,6 +438,18 @@ impl Db {
             })
         })?
         .collect()
+    }
+}
+
+/// Tipo MIME de uma imagem pela extensão do arquivo; `None` se não for uma imagem que os
+/// agentes costumam aceitar (png, jpeg, gif, webp).
+pub fn image_mime(filename: &str) -> Option<&'static str> {
+    match filename.rsplit('.').next()?.to_ascii_lowercase().as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        _ => None,
     }
 }
 
@@ -628,6 +692,30 @@ mod tests {
         assert_eq!(db.pending().unwrap()[0].title, "tres");
         drop(db);
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn pasted_bytes_become_attachment_with_clean_name() {
+        let dir = std::env::temp_dir().join(format!("prumo-bytes-{}", std::process::id()));
+        let db = Db::open_in_memory().unwrap();
+        let t = db.add_task("t", "", None).unwrap();
+        let a = db.add_attachment_bytes(t, "..\\..\\evil:name.png", b"abc", &dir.join("anexos")).unwrap();
+        let b = db.add_attachment_bytes(t, "evilname.png", b"abcd", &dir.join("anexos")).unwrap();
+        let list = db.attachments(t).unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].id, a);
+        assert_eq!(list[0].filename, "evilname.png");
+        assert_eq!(list[0].size, 3);
+        assert!(list[0].stored_path.starts_with(dir.join("anexos").to_string_lossy().as_ref()));
+        assert_eq!(std::fs::read(&list[1].stored_path).unwrap(), b"abcd");
+        assert_ne!(list[0].stored_path, list[1].stored_path);
+        assert_eq!(b, list[1].id);
+        assert_eq!(db.add_attachment_bytes(t, "", b"x", &dir.join("anexos")).is_ok(), true);
+        assert_eq!(db.attachment(a).unwrap().filename, "evilname.png");
+        assert!(db.attachment(9999).is_err());
+        assert_eq!(image_mime("A.PNG"), Some("image/png"));
+        assert_eq!(image_mime("nota.txt"), None);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

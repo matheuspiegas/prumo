@@ -1,7 +1,18 @@
 name: Build Windows
 
-# Só roda quando você dispara manualmente (aba Actions > Build Windows > Run workflow).
+# Roda em pushes/merges na main, em pull requests para a main e manualmente
+# (aba Actions > Build Windows > Run workflow). Mudanças só de documentação não disparam.
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   workflow_dispatch:
 
 permissions:
@@ -12,6 +23,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Testes rápidos (Linux): core e cli em Rust e checagem de tipos do frontend.
+  # Rodam em paralelo com o build do Windows, que é bem mais lento.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tauri2/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            core
+            cli
+
+      - name: Testes do core
+        working-directory: core
+        run: cargo test
+
+      - name: Testes do cli e do servidor MCP
+        working-directory: cli
+        run: cargo test
+
+      - name: Checagem de tipos do frontend
+        working-directory: tauri2
+        run: |
+          npm ci
+          npx tsc --noEmit
+
   build:
     runs-on: windows-latest
     timeout-minutes: 60
