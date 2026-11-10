@@ -72,3 +72,22 @@
   width: 1rem;
   height: 1rem;
 }
+
+/* Arrastando um arquivo sobre o quadro: realça a área de soltar. */
+.prumo-board--drop {
+  position: relative;
+}
+.prumo-board--drop::after {
+  content: "Solte para inserir no quadro";
+  position: absolute;
+  inset: 0.5rem;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--primary);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--primary) 10%, transparent);
+  color: var(--foreground);
+  font-weight: 600;
+  pointer-events: none;
+}

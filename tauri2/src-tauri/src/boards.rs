@@ -194,9 +194,80 @@ pub fn read_text_file(path: String) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|_| "o arquivo não é um texto UTF-8 válido".to_string())
 }
 
+/// Tamanho máximo de um arquivo solto no quadro (imagem ou biblioteca).
+const MAX_DROPPED_FILE_BYTES: u64 = 25 * 1024 * 1024;
+/// Extensões aceitas em `read_dropped_file` (sem o ponto, em minúsculas): imagens que o Excalidraw
+/// insere e bibliotecas `.excalidrawlib`.
+const DROPPED_EXTENSIONS: [&str; 8] = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "excalidrawlib"];
+
+fn dropped_extension_ok(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| DROPPED_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+/// Lê os bytes de um arquivo solto no quadro. O Tauri intercepta o arrastar de arquivos da janela e só
+/// entrega o caminho, então a interface pede os bytes por aqui e os insere por código.
+fn read_dropped_bytes(path: &Path) -> Result<Vec<u8>, String> {
+    if !dropped_extension_ok(path) {
+        return Err("tipo de arquivo não suportado (imagens png, jpg, gif, webp, svg, bmp ou .excalidrawlib)".into());
+    }
+    let meta = std::fs::metadata(path).map_err(err)?;
+    if !meta.is_file() {
+        return Err("o caminho não é um arquivo".into());
+    }
+    let too_big = || format!("arquivo grande demais (máximo {} MB)", MAX_DROPPED_FILE_BYTES / 1024 / 1024);
+    if meta.len() > MAX_DROPPED_FILE_BYTES {
+        return Err(too_big());
+    }
+    let bytes = std::fs::read(path).map_err(err)?;
+    if bytes.len() as u64 > MAX_DROPPED_FILE_BYTES {
+        return Err(too_big()); // o arquivo pode ter crescido desde a consulta
+    }
+    Ok(bytes)
+}
+
+/// Bytes de uma imagem ou biblioteca arrastada para o quadro (bytes crus, sem base64).
+#[tauri::command]
+pub fn read_dropped_file(path: String) -> Result<tauri::ipc::Response, String> {
+    read_dropped_bytes(Path::new(&path)).map(tauri::ipc::Response::new)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dropped_files_accept_only_images_and_libraries() {
+        for ok in ["a.png", "b.JPG", "c.jpeg", "d.Gif", "e.webp", "f.svg", "g.bmp", "h.excalidrawlib", "C:\\x\\y.PNG"] {
+            assert!(dropped_extension_ok(Path::new(ok)), "{ok}");
+        }
+        for bad in ["a.exe", "a.txt", "a.json", "a.excalidraw", "a", "a.png.exe", ".png", "a.pngx", "a.png "] {
+            assert!(!dropped_extension_ok(Path::new(bad)), "{bad}");
+        }
+    }
+
+    #[test]
+    fn read_dropped_bytes_rules() {
+        let dir = std::env::temp_dir().join(format!("prumo-drop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = dir.join("foto.PNG");
+        std::fs::write(&png, [0x89, b'P', b'N', b'G', 0, 1, 2]).unwrap();
+        assert_eq!(read_dropped_bytes(&png).unwrap(), vec![0x89, b'P', b'N', b'G', 0, 1, 2]);
+
+        let txt = dir.join("nota.txt");
+        std::fs::write(&txt, "x").unwrap();
+        assert!(read_dropped_bytes(&txt).unwrap_err().contains("não suportado"));
+
+        // Pasta com nome de extensão aceita não é arquivo.
+        let folder = dir.join("pasta.png");
+        std::fs::create_dir_all(&folder).unwrap();
+        assert!(read_dropped_bytes(&folder).unwrap_err().contains("não é um arquivo"));
+
+        assert!(read_dropped_bytes(&dir.join("nao-existe.png")).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn extensions_are_whitelisted() {

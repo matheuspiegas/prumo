@@ -164,6 +164,8 @@ export const api = {
     writeLibrary: (library: string) => invoke<void>("write_board_library", { library }),
     /** Lê um arquivo de texto escolhido pelo usuário (só `.excalidrawlib`/`.excalidraw`/`.json`, até 20 MB). */
     readTextFile: (path: string) => invoke<string>("read_text_file", { path }),
+    /** Bytes de uma imagem (png, jpg, gif, webp, svg, bmp) ou `.excalidrawlib` solta no quadro, até 25 MB. */
+    readDroppedFile: (path: string) => invoke<ArrayBuffer>("read_dropped_file", { path }),
   },
   testClaude: (settings: Settings) => invoke<ClaudeTest>("test_claude", { settings }),
 };

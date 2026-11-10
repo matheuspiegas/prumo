@@ -547,6 +547,7 @@ pub fn run() {
             boards::read_board_library,
             boards::write_board_library,
             boards::read_text_file,
+            boards::read_dropped_file,
             voice::voice_start,
             voice::voice_stop,
             voice::voice_cancel,

@@ -6,7 +6,6 @@ import {
   exportToBlob,
   getNonDeletedElements,
   getSceneVersion,
-  loadLibraryFromBlob,
   restoreAppState,
   restoreElements,
   serializeAsJSON,
@@ -24,6 +23,7 @@ import "./board-canvas.css";
 import { mergeLibraries, parseUserLibrary, serializeUserLibrary } from "./library-utils";
 import { PRUMO_LIBRARY_ITEMS } from "./prumo-library";
 import { useBoardAutosave } from "./use-board-autosave";
+import { importLibraryText, useBoardFileDrop } from "./use-board-file-drop";
 
 export type BoardCanvasProps = {
   boardId: number;
@@ -108,6 +108,9 @@ function CanvasInner({ boardId, loaded, onSaveState }: BoardCanvasProps & { load
   themeRef.current = theme;
   const [excalidrawApi, setExcalidrawApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [importing, setImporting] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  // Arrastar imagem ou .excalidrawlib do Explorer para o quadro (o Tauri só entrega os caminhos).
+  const { dragging } = useBoardFileDrop(excalidrawApi, containerRef);
 
   const autosave = useBoardAutosave<Snapshot>({
     boardId,
@@ -153,13 +156,8 @@ function CanvasInner({ boardId, loaded, onSaveState }: BoardCanvasProps & { load
       });
       if (!path) return;
       const text = await api.boards.readTextFile(path);
-      const items = await loadLibraryFromBlob(new Blob([text], { type: "application/json" }));
-      if (items.length === 0) {
-        toast.error("Essa biblioteca não tem nenhum item.");
-        return;
-      }
-      await excalidrawApi.updateLibrary({ libraryItems: items, merge: true, openLibraryMenu: true });
-      toast.success(items.length === 1 ? "1 item importado para a biblioteca" : `${items.length} itens importados para a biblioteca`);
+      const n = await importLibraryText(excalidrawApi, text);
+      toast.success(n === 1 ? "1 item importado para a biblioteca" : `${n} itens importados para a biblioteca`);
     } catch (e) {
       toast.error(`Não foi possível importar a biblioteca: ${e instanceof Error ? e.message : e}`);
     } finally {
@@ -178,7 +176,7 @@ function CanvasInner({ boardId, loaded, onSaveState }: BoardCanvasProps & { load
   );
 
   return (
-    <div className="prumo-board">
+    <div ref={containerRef} className={dragging ? "prumo-board prumo-board--drop" : "prumo-board"}>
       <Excalidraw
         initialData={loaded.initialData}
         excalidrawAPI={setExcalidrawApi}
