@@ -9,6 +9,8 @@ lerna-debug.log*
 
 node_modules
 dist
+# Fontes do Excalidraw copiadas por scripts/copy-excalidraw-fonts.mjs (predev/prebuild)
+public/excalidraw-assets
 dist-ssr
 *.local
 

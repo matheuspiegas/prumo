@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { DUR_BASE, DUR_FAST, easeOut, spring } from "@/lib/motion";
 import { AnimatedCount } from "@/components/animated-count";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from "react";
-import { CalendarDays, CalendarRange, CheckCheck, Hash, Inbox, ListTodo, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Settings as SettingsIcon, Trash2, Sunrise, Sun } from "lucide-react";
+import { CalendarDays, CalendarRange, CheckCheck, Hash, Inbox, ListTodo, Monitor, Moon, PanelLeftClose, PenTool, PanelLeftOpen, Settings as SettingsIcon, Trash2, Sunrise, Sun } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -175,12 +175,16 @@ export function AppSidebar({
   onTrash,
   weekActive = false,
   onWeek,
+  boardsActive = false,
+  onBoards,
   tags = [],
   activeTag = null,
   onTag,
 }: {
   weekActive?: boolean;
   onWeek?: () => void;
+  boardsActive?: boolean;
+  onBoards?: () => void;
   filter: Filter;
   onFilter: (f: Filter) => void;
   counts: Counts;
@@ -207,7 +211,7 @@ export function AppSidebar({
       <SidebarMenuBadge>{node}</SidebarMenuBadge>
     );
   const withCount = (label: string, n: number) => (n > 0 ? `${label} · ${n}` : label);
-  const activeKey = settingsActive ? "settings" : trashActive ? "trash" : weekActive ? "week" : activeTag ? `tag:${activeTag.toLowerCase()}` : `f${filter}`;
+  const activeKey = settingsActive ? "settings" : trashActive ? "trash" : boardsActive ? "boards" : weekActive ? "week" : activeTag ? `tag:${activeTag.toLowerCase()}` : `f${filter}`;
   return (
     <Sidebar
       collapsible="none"
@@ -239,7 +243,7 @@ export function AppSidebar({
             <SidebarGroupContent>
               <SidebarMenu>
                 <MItem variants={itemVariants} custom={0} initial="hidden" animate="show">
-                  <NavButton collapsed={collapsed} tooltip={withCount("Caixa de entrada", counts.inbox)} active={!settingsActive && !trashActive && !weekActive && !activeTag && filter === 4} onClick={() => onFilter(4)}>
+                  <NavButton collapsed={collapsed} tooltip={withCount("Caixa de entrada", counts.inbox)} active={!settingsActive && !trashActive && !weekActive && !boardsActive && !activeTag && filter === 4} onClick={() => onFilter(4)}>
                     <Inbox />
                     <span>Caixa de entrada</span>
                   </NavButton>
@@ -263,7 +267,7 @@ export function AppSidebar({
                         transition={{ duration: 0.6 }}
                       />
                     )}
-                    <NavButton collapsed={collapsed} tooltip={withCount(label, badge(f))} active={!settingsActive && !trashActive && !weekActive && !activeTag && filter === f} onClick={() => onFilter(f)}>
+                    <NavButton collapsed={collapsed} tooltip={withCount(label, badge(f))} active={!settingsActive && !trashActive && !weekActive && !boardsActive && !activeTag && filter === f} onClick={() => onFilter(f)}>
                       <Icon />
                       <span>{label}</span>
                     </NavButton>
@@ -275,6 +279,14 @@ export function AppSidebar({
                     <NavButton collapsed={collapsed} tooltip="Semana" active={weekActive && !settingsActive && !trashActive} onClick={onWeek}>
                       <CalendarRange />
                       <span>Semana</span>
+                    </NavButton>
+                  </MItem>
+                )}
+                {onBoards && (
+                  <MItem variants={itemVariants} custom={ITEMS.length + 2} initial="hidden" animate="show">
+                    <NavButton collapsed={collapsed} tooltip="Quadros" active={boardsActive && !settingsActive && !trashActive} onClick={onBoards}>
+                      <PenTool />
+                      <span>Quadros</span>
                     </NavButton>
                   </MItem>
                 )}

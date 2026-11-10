@@ -1,0 +1,74 @@
+/*
+ * Visual do Excalidraw alinhado ao Prumo (âmbar + cantos de 2px). Escopado a .prumo-board e feito só
+ * com as variáveis CSS do próprio Excalidraw. A especificidade (.prumo-board .excalidraw.theme--dark)
+ * supera a do pacote (.excalidraw.theme--dark), então não depende da ordem de carga dos estilos.
+ */
+.prumo-board {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.prumo-board .excalidraw,
+.prumo-board .excalidraw.theme--dark {
+  --border-radius-md: var(--radius);
+  --border-radius-lg: calc(var(--radius) * 1.5);
+  --color-primary: var(--primary);
+  --color-primary-hover: color-mix(in oklab, var(--primary) 88%, black);
+  --color-primary-darker: color-mix(in oklab, var(--primary) 80%, black);
+  --color-primary-darkest: color-mix(in oklab, var(--primary) 66%, black);
+  --color-brand-hover: var(--color-primary-hover);
+  --color-brand-active: var(--color-primary-darker);
+  --color-selection: color-mix(in oklab, var(--primary) 85%, black);
+}
+
+.prumo-board .excalidraw {
+  --color-primary-light: color-mix(in oklab, var(--primary) 20%, white);
+  --color-primary-light-darker: color-mix(in oklab, var(--primary) 32%, white);
+  --color-surface-primary-container: color-mix(in oklab, var(--primary) 24%, white);
+  --color-on-primary-container: oklch(0.3 0.06 75);
+}
+
+.prumo-board .excalidraw.theme--dark {
+  --color-primary-hover: color-mix(in oklab, var(--primary) 88%, white);
+  --color-primary-darker: color-mix(in oklab, var(--primary) 80%, white);
+  --color-primary-darkest: color-mix(in oklab, var(--primary) 66%, white);
+  --color-selection: var(--primary);
+  --color-primary-light: color-mix(in oklab, var(--primary) 26%, #232329);
+  --color-primary-light-darker: color-mix(in oklab, var(--primary) 20%, #232329);
+  --color-surface-primary-container: color-mix(in oklab, var(--primary) 30%, #232329);
+  --color-on-primary-container: oklch(0.92 0.06 80);
+}
+
+/* "Navegar bibliotecas" abre libraries.excalidraw.com, que não consegue voltar para o app desktop:
+   usamos o botão "Importar biblioteca" (arquivo .excalidrawlib). */
+.prumo-board .library-menu-browse-button {
+  display: none;
+}
+
+.prumo-board .prumo-import-library {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  height: var(--lg-button-size, 2.25rem);
+  padding: 0 0.625rem;
+  border: 1px solid var(--default-border-color, var(--color-border-outline-variant));
+  border-radius: var(--border-radius-lg);
+  background: var(--island-bg-color);
+  color: var(--text-primary-color, inherit);
+  font-size: 0.8125rem;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.prumo-board .prumo-import-library:hover:not(:disabled) {
+  background: var(--color-primary-light);
+}
+.prumo-board .prumo-import-library:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.prumo-board .prumo-import-library svg {
+  width: 1rem;
+  height: 1rem;
+}

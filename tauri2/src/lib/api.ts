@@ -75,6 +75,9 @@ export type VoiceResult = {
 
 export type TrashItem = { task: Task; daysAgo: number; daysLeft: number };
 
+/** Quadro branco (ver docs/plano-quadros.md). A cena em si (JSON do Excalidraw) fica em arquivo, não aqui. */
+export type Board = { id: number; name: string; createdAt: string; updatedAt: string; hasThumbnail: boolean };
+
 /** Visão Semana: atrasadas + um item por dia + sem data (ver docs/plano-semana.md). */
 export type DayData = { date: string; tasks: Task[] };
 export type WeekData = { overdue: Task[]; days: DayData[]; undated: Task[] };
@@ -138,6 +141,30 @@ export const api = {
   models: () => invoke<Discovery>("discover_models"),
   detectClaude: (path: string | null) => invoke<ClaudeStatus>("detect_claude", { path }),
   mcpCommand: () => invoke<string>("mcp_command"),
+  /** Quadros: o backend emite o evento `boards-changed` ao criar, renomear, duplicar ou excluir. */
+  boards: {
+    list: () => invoke<Board[]>("list_boards"),
+    /** Sem nome, o backend usa "Quadro sem título" (com número se já existir). */
+    create: (name?: string) => invoke<Board>("create_board", { name: name ?? null }),
+    rename: (id: number, name: string) => invoke<void>("rename_board", { id, name }),
+    duplicate: (id: number) => invoke<Board>("duplicate_board", { id }),
+    /** Apaga o registro e os arquivos do quadro (a confirmação é da interface). */
+    remove: (id: number) => invoke<void>("delete_board", { id }),
+    /** JSON da cena (formato `.excalidraw`), ou `null` se o quadro ainda está vazio. */
+    read: (id: number) => invoke<string | null>("read_board", { id }),
+    /** Grava a cena (JSON em texto) de forma atômica e atualiza `updatedAt`. */
+    write: (id: number, scene: string) => invoke<void>("write_board", { id, scene }),
+    /** Miniatura PNG do quadro (bytes crus, sem base64). */
+    writeThumbnail: (id: number, png: ArrayBuffer) =>
+      invoke<void>("write_board_thumbnail", png, { headers: { "x-board-id": String(id) } }),
+    /** Bytes da miniatura; falha se `hasThumbnail` for falso. */
+    readThumbnail: (id: number) => invoke<ArrayBuffer>("read_board_thumbnail", { id }),
+    /** Bibliotecas importadas (JSON `.excalidrawlib`); `"[]"`-equivalente se nunca houve importação. */
+    readLibrary: () => invoke<string>("read_board_library"),
+    writeLibrary: (library: string) => invoke<void>("write_board_library", { library }),
+    /** Lê um arquivo de texto escolhido pelo usuário (só `.excalidrawlib`/`.excalidraw`/`.json`, até 20 MB). */
+    readTextFile: (path: string) => invoke<string>("read_text_file", { path }),
+  },
   testClaude: (settings: Settings) => invoke<ClaudeTest>("test_claude", { settings }),
 };
 

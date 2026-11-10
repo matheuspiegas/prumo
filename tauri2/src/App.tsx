@@ -14,6 +14,7 @@ import { useUndo } from "@/hooks/use-undo";
 import { SettingsView } from "@/components/settings";
 import { TaskRow } from "@/components/task-row";
 import { WeekView } from "@/components/week/week-view";
+import { BoardsView } from "@/components/boards/boards-view";
 import { SearchBox } from "@/components/search-box";
 import { Collapse, SwapText } from "@/components/animated-title";
 import { EmptyState } from "@/components/empty-state";
@@ -69,7 +70,7 @@ export default function App() {
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [tagList, setTagList] = useState<TagCount[]>([]);
   const activeTagRef = useRef<string | null>(null);
-  const [view, setView] = useState<"tasks" | "settings" | "trash" | "week">("tasks");
+  const [view, setView] = useState<"tasks" | "settings" | "trash" | "week" | "boards">("tasks");
   // Incrementa a cada refresh: a visão Semana recarrega junto (tasks-changed, foco, diálogo salvo).
   const [weekTick, setWeekTick] = useState(0);
   const [query, setQuery] = useState("");
@@ -413,6 +414,8 @@ export default function App() {
         }}
         weekActive={view === "week"}
         onWeek={() => setView("week")}
+        boardsActive={view === "boards"}
+        onBoards={() => setView("boards")}
         onFilter={(f) => {
           setActiveTag(null);
           setFilter(f);
@@ -438,6 +441,8 @@ export default function App() {
           <SettingsView />
         ) : view === "trash" ? (
           <TrashView onChanged={refresh} />
+        ) : view === "boards" ? (
+          <BoardsView />
         ) : view === "week" ? (
           <WeekView
             today={today}
