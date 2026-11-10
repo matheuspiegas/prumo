@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 
 // Cada assunto vive no seu arquivo, com seu próprio `impl Db { ... }`.
 // Assim agentes diferentes não conflitam ao editar.
+pub mod boards; // quadros brancos (Excalidraw)
+pub use boards::Board;
 mod overdue; // atrasadas, reagendar e prioridade
 mod planner; // visão Semana (week, move_task)
 pub use planner::WeekRaw;
@@ -77,7 +79,7 @@ CREATE TABLE IF NOT EXISTS attachments (
 ";
 
 /// Versão atual do schema (`PRAGMA user_version`).
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// Filtro das listagens "normais": fora da lixeira e sem subtarefas.
 pub(crate) const LIVE: &str = "deleted_at IS NULL AND parent_id IS NULL";
@@ -198,6 +200,18 @@ impl Db {
                      PRIMARY KEY (task_id, tag_id)
                  );
                  CREATE INDEX IF NOT EXISTS idx_task_tags_tag ON task_tags(tag_id);",
+            )?;
+        }
+        if version < 3 {
+            // Quadros brancos: o registro fica aqui; cena e miniatura, em arquivos.
+            tx.execute_batch(
+                "CREATE TABLE IF NOT EXISTS boards (
+                     id         INTEGER PRIMARY KEY,
+                     name       TEXT NOT NULL,
+                     position   INTEGER NOT NULL DEFAULT 0,
+                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                 );",
             )?;
         }
         // PRAGMA user_version não aceita parâmetros; o valor é uma constante nossa.

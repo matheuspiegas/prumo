@@ -1,4 +1,5 @@
 mod audio;
+mod boards;
 mod interpret;
 mod logging;
 mod quickadd;
@@ -534,6 +535,19 @@ pub fn run() {
             tags_cmds::list_tasks_by_tag,
             tags_cmds::rename_tag,
             tags_cmds::delete_tag,
+            boards::list_boards,
+            boards::create_board,
+            boards::rename_board,
+            boards::duplicate_board,
+            boards::delete_board,
+            boards::read_board,
+            boards::write_board,
+            boards::write_board_thumbnail,
+            boards::read_board_thumbnail,
+            boards::read_board_library,
+            boards::write_board_library,
+            boards::read_text_file,
+            boards::read_dropped_file,
             voice::voice_start,
             voice::voice_stop,
             voice::voice_cancel,
