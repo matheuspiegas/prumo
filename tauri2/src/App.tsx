@@ -14,6 +14,7 @@ import { useUndo } from "@/hooks/use-undo";
 import { SettingsView } from "@/components/settings";
 import { TaskRow } from "@/components/task-row";
 import { WeekView } from "@/components/week/week-view";
+import { DoneView } from "@/components/done/done-view";
 import { BoardsView } from "@/components/boards/boards-view";
 import { SearchBox } from "@/components/search-box";
 import { Collapse, SwapText } from "@/components/animated-title";
@@ -451,6 +452,15 @@ export default function App() {
             activeTag={activeTag}
             onClearTag={() => setActiveTag(null)}
             onOpenTask={(t) => setDialog({ open: true, task: t })}
+            pushUndo={undo.push}
+          />
+        ) : filter === 3 && !activeTag ? (
+          <DoneView
+            today={today}
+            tomorrow={tomorrow}
+            refreshKey={weekTick}
+            onOpenTask={(t) => setDialog({ open: true, task: t })}
+            onChanged={refresh}
             pushUndo={undo.push}
           />
         ) : (
