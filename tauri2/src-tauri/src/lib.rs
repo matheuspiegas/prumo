@@ -147,6 +147,30 @@ fn list_tasks(db: State<AppDb>, filter: i32) -> Result<Vec<TaskDto>, String> {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompletedDto {
+    task: TaskDto,
+    /// Instante local da conclusão, "YYYY-MM-DD HH:MM".
+    completed_at: String,
+}
+
+/// Concluídas entre `from` e `to` (datas locais YYYY-MM-DD, inclusivas; null = sem limite).
+#[tauri::command]
+fn list_completed(db: State<AppDb>, from: Option<String>, to: Option<String>) -> Result<Vec<CompletedDto>, String> {
+    let db = lock(&db)?;
+    let items = db.completed_between(from.as_deref(), to.as_deref()).map_err(err)?;
+    let stamps: Vec<String> = items.iter().map(|c| c.completed_at.clone()).collect();
+    let tasks = with_tags(&db, items.into_iter().map(|c| c.task).collect())?;
+    Ok(tasks.into_iter().zip(stamps).map(|(task, completed_at)| CompletedDto { task, completed_at }).collect())
+}
+
+/// Quantas concluídas no período (para comparar com o período anterior).
+#[tauri::command]
+fn count_completed(db: State<AppDb>, from: Option<String>, to: Option<String>) -> Result<i64, String> {
+    lock(&db)?.count_completed_between(from.as_deref(), to.as_deref()).map_err(err)
+}
+
+#[derive(Serialize)]
 struct DayDto {
     date: String,
     tasks: Vec<TaskDto>,
@@ -517,6 +541,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_tasks,
             list_week,
+            list_completed,
+            count_completed,
             move_task,
             counts,
             add_task,
