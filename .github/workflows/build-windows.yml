@@ -37,7 +37,8 @@ jobs:
           cache: npm
           cache-dependency-path: tauri2/package-lock.json
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Mesma versão do rust-toolchain.toml (o Cargo 1.100 quebra o build do ort-sys rc.12).
+      - uses: dtolnay/rust-toolchain@1.99.1
 
       - uses: swatinem/rust-cache@v2
         with:
@@ -72,7 +73,8 @@ jobs:
           cache: npm
           cache-dependency-path: tauri2/package-lock.json
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Mesma versão do rust-toolchain.toml (o Cargo 1.100 quebra o build do ort-sys rc.12).
+      - uses: dtolnay/rust-toolchain@1.99.1
 
       # Compartilha o cache de compilação do Rust entre execuções.
       - uses: swatinem/rust-cache@v2
@@ -83,6 +85,9 @@ jobs:
             cli
           # Muda a chave quando a configuração do ggml muda, para não reaproveitar um build antigo.
           key: ggml-native-off
+          # Guarda as dependências compiladas mesmo se o build falhar: a próxima execução não
+          # recomeça do zero (o build frio das dependências leva vários minutos no Windows).
+          cache-on-failure: true
 
       - name: Instalar dependências do frontend
         working-directory: tauri2
@@ -99,6 +104,7 @@ jobs:
         with:
           projectPath: tauri2
           # Liga o motor ggml (Whisper .bin e .gguf, como no Handy). Compila C++ com CMake,
-          # que já vem na imagem windows-latest.
-          args: --features ggml
+          # que já vem na imagem windows-latest. Em PRs gera só o instalador NSIS (o MSI soma
+          # ~20 s e é o mesmo app); pushes na main e execuções manuais geram os dois.
+          args: --features ggml${{ github.event_name == 'pull_request' && ' --bundles nsis' || '' }}
           uploadWorkflowArtifacts: true
