@@ -43,6 +43,8 @@ export type Settings = {
   shortcut: string;
   quickAddShortcut: string;
   reminders: boolean;
+  launchAtLogin: boolean;
+  startMinimized: boolean;
 };
 export type ModelInfo = {
   id: string;
@@ -133,6 +135,7 @@ export const api = {
     invoke<number>("quick_add_task", { title, date, time }),
   setTime: (id: number, time: string | null) => invoke<void>("set_task_time", { id, time }),
   openLogs: () => invoke<string>("open_logs"),
+  testReminder: () => invoke<void>("test_reminder"),
   voiceStart: () => invoke<void>("voice_start"),
   voiceStop: () => invoke<VoiceResult>("voice_stop"),
   voiceCancel: () => invoke<void>("voice_cancel"),
