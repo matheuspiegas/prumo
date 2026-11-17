@@ -6,19 +6,25 @@ import { ptBR as dfPtBR } from "date-fns/locale";
 import { ptBR } from "react-day-picker/locale";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { CalendarIcon, Check, Loader2, Mic, Square } from "lucide-react";
-import { api, fromIso, toIso, type VoiceResult } from "@/lib/api";
+import { api, fromIso, toIso, type CreatedTask, type VoiceResult } from "@/lib/api";
 import { Calendar } from "@/components/ui/calendar";
 import { useVoice } from "@/hooks/use-voice";
 import { VoiceWaves } from "@/components/voice-waves";
 import { TimeField } from "@/components/time-field";
 import { cn } from "@/lib/utils";
 
-type Done = { title: string; date: string | null; inbox: boolean; warning: string | null };
+type Done = { tasks: CreatedTask[]; inbox: boolean; warning: string | null };
+
+/** "quarta-feira, 18 de novembro · 16:00" (partes ausentes são omitidas). */
+function when(t: CreatedTask): string {
+  const d = t.date ? fromIso(t.date) : null;
+  return [d ? format(d, "EEEE, d 'de' MMMM", { locale: dfPtBR }) : null, t.time].filter(Boolean).join(" · ");
+}
 
 /** Folga (px) que a janela ganha ao abrir o calendário; é transparente, então não aparece. */
 const CALENDAR_ROOM = 360;
 
-/** Janelinha flutuante: Enter cria a tarefa, Esc fecha, microfone usa o fluxo de voz. */
+/** Janelinha flutuante: Enter manda o texto para a IA (pode virar várias tarefas), Esc fecha, microfone usa o fluxo de voz. */
 export function QuickAdd() {
   const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -50,10 +56,12 @@ export function QuickAdd() {
     (d: Done) => {
       clearHideTimer();
       setDone(d);
+      // Mais tarefas (ou um aviso) = mais tempo para ler.
+      const ms = Math.min(4000, 1200 + 700 * (d.tasks.length - 1) + (d.warning ? 1500 : 0));
       hideTimer.current = setTimeout(() => {
         hideTimer.current = null;
         close();
-      }, 1200);
+      }, ms);
     },
     [clearHideTimer, close],
   );
@@ -84,17 +92,16 @@ export function QuickAdd() {
   const onVoiceCreated = useCallback(
     (r: VoiceResult) =>
       showDone({
-        title: r.title,
-        date: r.date,
+        tasks: r.tasks,
         inbox: r.inbox,
-        warning: r.fallback || r.warning ? `Não consegui interpretar com o Claude${r.warning ? ` (${r.warning})` : ""}; usei o texto bruto.` : null,
+        warning: r.fallback || r.warning ? `Não consegui interpretar${r.warning ? ` (${r.warning})` : ""}; usei o texto bruto.` : null,
       }),
     [showDone],
   );
   const onVoiceError = useCallback((msg: string) => setError(msg), []);
   const voice = useVoice(onVoiceCreated, { quiet: true, onError: onVoiceError });
   const voiceBusy = voice.state !== "idle";
-  const working = voice.state === "transcribing" || voice.state === "interpreting";
+  const working = saving || voice.state === "transcribing" || voice.state === "interpreting";
 
   // A janela acompanha a altura do cartão. Com o calendário não dá para seguir o cartão quadro a
   // quadro (o redimensionamento nativo pula): ao abrir, a janela (transparente) cresce de uma vez
@@ -160,14 +167,20 @@ export function QuickAdd() {
     setSaving(true);
     setError(null);
     try {
-      await api.quickAdd(t, date, time);
+      // A IA separa o texto em tarefas; data/hora escolhidas aqui valem como padrão.
+      const r = await api.quickAddSmart(t, date, time);
       // Tarefa digitada vai direto para as tarefas (o Rust aprova sempre).
       setTitle("");
-      showDone({ title: t, date, inbox: false, warning: null });
+      setSaving(false);
+      showDone({
+        tasks: r.tasks,
+        inbox: false,
+        warning: r.warning ? `Não consegui interpretar (${r.warning}); salvei o texto como está.` : null,
+      });
     } catch (e) {
       setError(String(e));
-    } finally {
       setSaving(false);
+      requestAnimationFrame(() => input.current?.focus());
     }
   };
 
@@ -177,11 +190,9 @@ export function QuickAdd() {
     : { initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.15 } };
 
   if (done) {
-    const d = done.date ? fromIso(done.date) : null;
-    const detail = [
-      d ? format(d, "EEEE, d 'de' MMMM", { locale: dfPtBR }) : null,
-      done.inbox ? "na caixa de entrada" : null,
-    ]
+    const single = done.tasks.length === 1;
+    const first = done.tasks[0];
+    const detail = [single && first ? when(first) : null, done.inbox ? "na caixa de entrada" : null]
       .filter(Boolean)
       .join(" · ");
     return (
@@ -192,13 +203,27 @@ export function QuickAdd() {
               <Check className="size-4" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-base leading-tight">
-                <span className="text-muted-foreground">Tarefa criada · </span>
-                {done.title}
-              </p>
+              {single ? (
+                <p className="truncate text-base leading-tight">
+                  <span className="text-muted-foreground">Tarefa criada · </span>
+                  {first?.title}
+                </p>
+              ) : (
+                <p className="truncate text-base leading-tight">{done.tasks.length} tarefas criadas</p>
+              )}
               <p className="h-4 truncate text-xs leading-4 text-muted-foreground">{detail}</p>
             </div>
           </motion.div>
+          {!single && (
+            <ul className="mt-1.5 flex flex-col gap-0.5 border-t pt-1.5 pl-12">
+              {done.tasks.map((t) => (
+                <li key={t.id} className="truncate text-sm">
+                  {t.title}
+                  {when(t) && <span className="text-muted-foreground"> · {when(t)}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
           <p className="h-[26px] truncate pt-1 text-xs leading-5 text-muted-foreground">{done.warning}</p>
         </div>
       </div>
@@ -212,7 +237,7 @@ export function QuickAdd() {
           {working ? (
             <motion.div {...fade} role="status" className="flex h-9 flex-1 items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
-              <span>{voice.state === "transcribing" ? "Transcrevendo…" : "Interpretando…"}</span>
+              <span>{voice.state === "transcribing" ? "Transcrevendo…" : "Criando tarefas…"}</span>
             </motion.div>
           ) : recording ? (
             <div className="flex h-9 flex-1 items-center gap-2 text-sm text-muted-foreground">
@@ -235,7 +260,7 @@ export function QuickAdd() {
                   void submit();
                 }
               }}
-              placeholder="Nova tarefa… (Enter para salvar)"
+              placeholder="Ex.: amanhã dentista às 16 e mercado às 18 (Enter)"
               className="h-9 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground"
             />
           )}
