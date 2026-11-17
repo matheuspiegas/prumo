@@ -3,16 +3,24 @@ use std::path::PathBuf;
 use tarefas_core::data_dir;
 
 pub const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+pub const AGENTS: [&str; 2] = ["claude", "codex"];
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     /// Pasta do modelo de transcrição escolhido (ex.: a do Parakeet do Handy).
     pub stt_model_dir: Option<String>,
+    /// Quem interpreta voz e tarefa rápida: "claude" (Claude Code) ou "codex" (Codex CLI).
+    pub agent: String,
     pub claude_model: String,
     pub claude_effort: String,
     /// Caminho manual do executável `claude` (opcional).
     pub claude_path: Option<String>,
+    /// Modelo do Codex (slug, ex.: "gpt-6.1-sol"); vazio = padrão do Codex.
+    pub codex_model: String,
+    pub codex_effort: String,
+    /// Caminho manual do executável `codex` (opcional).
+    pub codex_path: Option<String>,
     /// Tarefas por voz entram direto na lista, sem passar pela caixa de entrada.
     pub auto_approve: bool,
     /// Atalho global para iniciar/parar a gravação.
@@ -37,9 +45,13 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             stt_model_dir: None,
+            agent: "claude".into(),
             claude_model: "haiku".into(),
             claude_effort: "low".into(),
             claude_path: None,
+            codex_model: String::new(),
+            codex_effort: "low".into(),
+            codex_path: None,
             auto_approve: false,
             shortcut: "CommandOrControl+Shift+Space".into(),
             quick_add_shortcut: default_quick_add_shortcut().into(),
@@ -63,6 +75,17 @@ impl Settings {
         if !EFFORTS.contains(&self.claude_effort.as_str()) {
             self.claude_effort = Self::default().claude_effort;
         }
+        if !AGENTS.contains(&self.agent.as_str()) {
+            self.agent = Self::default().agent;
+        }
+        // Modelo do Codex: vazio é válido (usa o padrão do Codex).
+        self.codex_model = self.codex_model.trim().to_string();
+        if !self.codex_model.is_empty() && !model_ok(&self.codex_model) {
+            self.codex_model = String::new();
+        }
+        if !EFFORTS.contains(&self.codex_effort.as_str()) {
+            self.codex_effort = Self::default().codex_effort;
+        }
         self.shortcut = self.shortcut.trim().to_string();
         if self.shortcut.is_empty() {
             self.shortcut = Self::default().shortcut;
@@ -76,6 +99,7 @@ impl Settings {
             }
         }
         self.claude_path = self.claude_path.filter(|p| !p.trim().is_empty());
+        self.codex_path = self.codex_path.filter(|p| !p.trim().is_empty());
         self.stt_model_dir = self.stt_model_dir.filter(|p| !p.trim().is_empty());
         self
     }
@@ -111,6 +135,14 @@ mod tests {
         assert_eq!(s.claude_effort, "low");
         let ok = Settings { claude_model: "claude-haiku-5-5".into(), claude_effort: "high".into(), ..Default::default() }.sanitized();
         assert_eq!((ok.claude_model.as_str(), ok.claude_effort.as_str()), ("claude-haiku-5-5", "high"));
+    }
+
+    #[test]
+    fn sanitizes_codex_values() {
+        let s = Settings { agent: "gemini".into(), codex_model: "x; rm".into(), codex_effort: "ultra".into(), ..Default::default() }.sanitized();
+        assert_eq!((s.agent.as_str(), s.codex_model.as_str(), s.codex_effort.as_str()), ("claude", "", "low"));
+        let ok = Settings { agent: "codex".into(), codex_model: " gpt-6.1-sol ".into(), codex_effort: "medium".into(), ..Default::default() }.sanitized();
+        assert_eq!((ok.agent.as_str(), ok.codex_model.as_str(), ok.codex_effort.as_str()), ("codex", "gpt-6.1-sol", "medium"));
     }
 
     #[test]
