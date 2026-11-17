@@ -96,9 +96,15 @@ fn err<E: ToString>(e: E) -> String {
     e.to_string()
 }
 
-/// Comando para registrar o servidor MCP do Prumo no Claude Code.
+#[derive(Serialize)]
+struct McpCommands {
+    claude: String,
+    codex: String,
+}
+
+/// Comandos para registrar o servidor MCP do Prumo no Claude Code e no Codex.
 #[tauri::command]
-fn mcp_command() -> String {
+fn mcp_command() -> McpCommands {
     let exe = if cfg!(windows) { "prumo-cli.exe" } else { "prumo-cli" };
     let mut cands: Vec<PathBuf> = vec![];
     // Produção (e `tauri dev`): o sidecar fica ao lado do executável do app.
@@ -115,7 +121,10 @@ fn mcp_command() -> String {
         .and_then(|p| p.canonicalize().ok())
         .map(|p| p.display().to_string().trim_start_matches(r"\\?\").replace('\\', "/"))
         .unwrap_or_else(|| "prumo-cli".to_string());
-    format!("claude mcp add prumo -- \"{path}\" mcp")
+    McpCommands {
+        claude: format!("claude mcp add prumo -- \"{path}\" mcp"),
+        codex: format!("codex mcp add prumo -- \"{path}\" mcp"),
+    }
 }
 
 fn lock<'a>(db: &'a State<AppDb>) -> Result<std::sync::MutexGuard<'a, Db>, String> {
@@ -135,6 +144,30 @@ fn list_tasks(db: State<AppDb>, filter: i32) -> Result<Vec<TaskDto>, String> {
     }
     .map_err(err)?;
     with_tags(&db, tasks)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompletedDto {
+    task: TaskDto,
+    /// Instante local da conclusão, "YYYY-MM-DD HH:MM".
+    completed_at: String,
+}
+
+/// Concluídas entre `from` e `to` (datas locais YYYY-MM-DD, inclusivas; null = sem limite).
+#[tauri::command]
+fn list_completed(db: State<AppDb>, from: Option<String>, to: Option<String>) -> Result<Vec<CompletedDto>, String> {
+    let db = lock(&db)?;
+    let items = db.completed_between(from.as_deref(), to.as_deref()).map_err(err)?;
+    let stamps: Vec<String> = items.iter().map(|c| c.completed_at.clone()).collect();
+    let tasks = with_tags(&db, items.into_iter().map(|c| c.task).collect())?;
+    Ok(tasks.into_iter().zip(stamps).map(|(task, completed_at)| CompletedDto { task, completed_at }).collect())
+}
+
+/// Quantas concluídas no período (para comparar com o período anterior).
+#[tauri::command]
+fn count_completed(db: State<AppDb>, from: Option<String>, to: Option<String>) -> Result<i64, String> {
+    lock(&db)?.count_completed_between(from.as_deref(), to.as_deref()).map_err(err)
 }
 
 #[derive(Serialize)]
@@ -444,6 +477,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // Entrada "Prumo" em HKCU\...\Run, ligada/desligada em Configurações.
+        .plugin(tauri_plugin_autostart::Builder::new().arg(tray::AUTOSTART_ARG).build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -470,6 +505,13 @@ pub fn run() {
                 plog!("atalhos: {e}");
             }
             tray::setup(app.handle())?;
+            // A janela nasce oculta (tauri.conf.json); ao abrir junto com o sistema fica só na bandeja.
+            let autostart = std::env::args().any(|a| a == tray::AUTOSTART_ARG);
+            if autostart && cfg.start_minimized {
+                tray::hide_main(app.handle());
+            } else {
+                tray::show_main(app.handle());
+            }
             reminders::start(app.handle());
             watch_external_changes(app.handle().clone(), dir.join("prumo.db"));
             Ok(())
@@ -499,6 +541,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_tasks,
             list_week,
+            list_completed,
+            count_completed,
             move_task,
             counts,
             add_task,
@@ -529,7 +573,9 @@ pub fn run() {
             dates,
             open_logs,
             quickadd::quick_add_task,
+            quickadd::quick_add_smart,
             reminders::set_task_time,
+            reminders::test_reminder,
             tags_cmds::list_tags,
             tags_cmds::set_task_tags,
             tags_cmds::list_tasks_by_tag,
@@ -555,8 +601,9 @@ pub fn run() {
             mcp_command,
             voice::save_settings,
             voice::discover_models,
-            voice::detect_claude,
-            voice::test_claude
+            voice::detect_agent,
+            voice::codex_models,
+            voice::test_agent
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

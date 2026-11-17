@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 // Cada assunto vive no seu arquivo, com seu próprio `impl Db { ... }`.
 // Assim agentes diferentes não conflitam ao editar.
 pub mod boards; // quadros brancos (Excalidraw)
+mod history; // concluídas por período (completed_at)
+pub use history::CompletedTask;
 pub use boards::Board;
 mod overdue; // atrasadas, reagendar e prioridade
 mod planner; // visão Semana (week, move_task)
@@ -79,7 +81,7 @@ CREATE TABLE IF NOT EXISTS attachments (
 ";
 
 /// Versão atual do schema (`PRAGMA user_version`).
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// Filtro das listagens "normais": fora da lixeira e sem subtarefas.
 pub(crate) const LIVE: &str = "deleted_at IS NULL AND parent_id IS NULL";
@@ -214,6 +216,17 @@ impl Db {
                  );",
             )?;
         }
+        if version < 4 {
+            // Quando a tarefa foi concluída (UTC). As já concluídas herdam `updated_at`: é a
+            // melhor aproximação disponível (o histórico real não existia).
+            if !self.has_column("tasks", "completed_at")? {
+                tx.execute_batch("ALTER TABLE tasks ADD COLUMN completed_at TEXT")?;
+            }
+            tx.execute_batch(
+                "UPDATE tasks SET completed_at = updated_at WHERE done = 1 AND completed_at IS NULL;
+                 CREATE INDEX IF NOT EXISTS idx_tasks_completed ON tasks(completed_at);",
+            )?;
+        }
         // PRAGMA user_version não aceita parâmetros; o valor é uma constante nossa.
         tx.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))?;
         tx.commit()
@@ -298,7 +311,12 @@ impl Db {
     pub fn set_done(&self, id: i64, done: bool) -> Result<()> {
         let was_done = self.conn.query_row("SELECT done FROM tasks WHERE id = ?1", [id], |r| r.get::<_, i64>(0))? != 0;
         self.conn.execute(
-            "UPDATE tasks SET done = ?2, updated_at = datetime('now') WHERE id = ?1",
+            // completed_at: grava ao concluir (sem sobrescrever se já estava concluída) e limpa ao reabrir.
+            "UPDATE tasks SET done = ?2, updated_at = datetime('now'),
+             completed_at = CASE WHEN ?2 = 0 THEN NULL
+                                 WHEN done = 1 AND completed_at IS NOT NULL THEN completed_at
+                                 ELSE datetime('now') END
+             WHERE id = ?1",
             params![id, done as i64],
         )?;
         if done && !was_done {
@@ -340,7 +358,7 @@ impl Db {
 
     pub fn completed(&self) -> Result<Vec<Task>> {
         let mut st = self.conn.prepare(&format!(
-            "SELECT {TASK_COLS} FROM tasks WHERE status = 'active' AND {LIVE} AND done = 1 ORDER BY updated_at DESC"
+            "SELECT {TASK_COLS} FROM tasks WHERE status = 'active' AND {LIVE} AND done = 1 ORDER BY COALESCE(completed_at, updated_at) DESC, id DESC"
         ))?;
         st.query_map([], row_to_task)?.collect()
     }

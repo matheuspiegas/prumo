@@ -344,7 +344,7 @@ mod tests {
         }
         let db = Db::open(&path).unwrap();
         let v: i64 = db.conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(v, 3);
+        assert_eq!(v, crate::SCHEMA_VERSION);
         let t = db.pending().unwrap();
         assert_eq!((t.len(), t[0].title.as_str()), (1, "minha tarefa"));
         assert!(db.list_boards().unwrap().is_empty());

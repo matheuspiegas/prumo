@@ -1,6 +1,20 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { centerOf, useThemeTransition } from "@/hooks/use-theme-transition";
-import { AlertCircle, CheckCircle2, FlaskConical, Copy, FolderOpen, Loader2 } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  FlaskConical,
+  Copy,
+  FolderOpen,
+  Loader2,
+  Mic,
+  Palette,
+  Plug,
+  Settings2,
+  Sparkles,
+  Stethoscope,
+  type LucideIcon,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -9,12 +23,16 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { DUR_BASE, DUR_FAST, easeOut, fadeUp, softSpring } from "@/lib/motion";
+import { cn } from "@/lib/utils";
 import {
   acceleratorFromEvent,
   api,
   prettyShortcut,
-  type ClaudeStatus,
-  type ClaudeTest,
+  type Agent,
+  type AgentStatus,
+  type AgentTest,
+  type CodexModel,
+  type McpCommands,
   type Discovery,
   type Settings,
 } from "@/lib/api";
@@ -36,8 +54,41 @@ const THEMES = [
   { value: "light", label: "Claro" },
   { value: "dark", label: "Escuro" },
 ];
+const AGENTS: { value: Agent; label: string; hint: string }[] = [
+  { value: "claude", label: "Claude Code", hint: "Usa a CLI `claude` com a sua assinatura da Anthropic." },
+  { value: "codex", label: "Codex", hint: "Usa a CLI `codex` com a sua conta da OpenAI." },
+];
 const AUTO = "__auto__";
+const CODEX_DEFAULT = "__codex_default__";
 const CUSTOM = "__custom__";
+
+type TabId = "geral" | "voz" | "ia" | "agentes" | "aparencia" | "diagnostico";
+
+/** Abas das configurações; `fields` marca a aba quando há alteração não salva nesses campos. */
+const TABS: { id: TabId; label: string; icon: LucideIcon; fields: (keyof Settings)[] }[] = [
+  { id: "geral", label: "Geral", icon: Settings2, fields: ["reminders", "launchAtLogin", "startMinimized"] },
+  { id: "voz", label: "Voz", icon: Mic, fields: ["sttModelDir", "shortcut", "quickAddShortcut", "autoApprove"] },
+  {
+    id: "ia",
+    label: "Interpretação",
+    icon: Sparkles,
+    fields: ["agent", "claudeModel", "claudeEffort", "claudePath", "codexModel", "codexEffort", "codexPath"],
+  },
+  { id: "agentes", label: "Agentes", icon: Plug, fields: [] },
+  { id: "aparencia", label: "Aparência", icon: Palette, fields: [] },
+  { id: "diagnostico", label: "Diagnóstico", icon: Stethoscope, fields: [] },
+];
+
+/** Última aba aberta (conveniência deste computador; falha em silêncio). */
+const TAB_KEY = "prumo.settings.tab";
+function loadTab(): TabId {
+  try {
+    const t = localStorage.getItem(TAB_KEY);
+    return TABS.some((x) => x.id === t) ? (t as TabId) : "geral";
+  } catch {
+    return "geral";
+  }
+}
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -48,6 +99,25 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
       </div>
       {children}
     </motion.section>
+  );
+}
+
+function CommandRow({ label, cmd }: { label: string; cmd: string }) {
+  return (
+    <Field label={label} hint="Rode este comando uma vez no terminal. Se mover o app de pasta, rode de novo.">
+      <div className="flex items-center gap-2">
+        <code className="min-w-0 flex-1 truncate rounded-md border bg-muted px-3 py-2 text-xs">{cmd}</code>
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="Copiar comando"
+          disabled={!cmd}
+          onClick={() => navigator.clipboard.writeText(cmd).then(() => toast.success("Comando copiado"))}
+        >
+          <Copy className="size-4" />
+        </Button>
+      </div>
+    </Field>
   );
 }
 
@@ -66,18 +136,44 @@ export function SettingsView() {
   const [saved, setSaved] = useState<Settings | null>(null);
   const [form, setForm] = useState<Settings | null>(null);
   const [discovery, setDiscovery] = useState<Discovery | null>(null);
-  const [mcpCmd, setMcpCmd] = useState("");
-  const [claude, setClaude] = useState<ClaudeStatus | null>(null);
+  const [mcpCmd, setMcpCmd] = useState<McpCommands | null>(null);
+  const [status, setStatus] = useState<AgentStatus | null>(null);
+  const [codexModels, setCodexModels] = useState<CodexModel[] | null>(null);
   const [testing, setTesting] = useState(false);
-  const [test, setTest] = useState<{ ok: true; r: ClaudeTest } | { ok: false; e: string } | null>(null);
+  const [test, setTest] = useState<{ ok: true; r: AgentTest } | { ok: false; e: string } | null>(null);
   const [capturing, setCapturing] = useState(false);
   const [capturingQuick, setCapturingQuick] = useState(false);
+  const [tab, setTab] = useState<TabId>(loadTab);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const selectTab = (id: TabId) => {
+    setTab(id);
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    try {
+      localStorage.setItem(TAB_KEY, id);
+    } catch {
+      /* sem armazenamento: só não lembra */
+    }
+  };
+  // Setas (↑↓ e ←→), Home e End movem entre as abas, como numa lista de abas nativa.
+  const onTabKey = (e: React.KeyboardEvent) => {
+    const i = TABS.findIndex((t) => t.id === tab);
+    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
+    const next = step !== undefined ? (i + step + TABS.length) % TABS.length : e.key === "Home" ? 0 : e.key === "End" ? TABS.length - 1 : -1;
+    if (next < 0) return;
+    e.preventDefault();
+    selectTab(TABS[next].id);
+    document.getElementById(`tab-${TABS[next].id}`)?.focus();
+  };
 
   useEffect(() => {
     api.mcpCommand().then(setMcpCmd).catch(() => {});
   }, []);
 
-  const detect = useCallback((path: string | null) => api.detectClaude(path).then(setClaude).catch(() => {}), []);
+  const detect = useCallback((agent: Agent, path: string | null) => {
+    setStatus(null);
+    api.detectAgent(agent, path).then(setStatus).catch(() => {});
+  }, []);
 
   useEffect(() => {
     api
@@ -85,14 +181,32 @@ export function SettingsView() {
       .then((s) => {
         setSaved(s);
         setForm(s);
-        detect(s.claudePath);
       })
       .catch((e) => toast.error(String(e)));
     api.models().then(setDiscovery).catch(() => {});
-  }, [detect]);
+  }, []);
+
+  // Revalida a CLI ao trocar de agente ou depois de salvar um caminho novo.
+  const agent = form?.agent;
+  const savedPath = saved ? (agent === "codex" ? saved.codexPath : saved.claudePath) : null;
+  useEffect(() => {
+    if (!agent) return;
+    detect(agent, savedPath);
+    setTest(null);
+  }, [agent, savedPath, detect]);
+
+  // Catálogo de modelos do Codex (só quando o Codex está escolhido).
+  const codexPath = saved?.codexPath ?? null;
+  useEffect(() => {
+    if (agent !== "codex") return;
+    api.codexModels(codexPath).then(setCodexModels).catch(() => setCodexModels([]));
+  }, [agent, codexPath]);
 
   if (!form || !saved) return null;
   const dirty = JSON.stringify(form) !== JSON.stringify(saved);
+  const dirtyTabs = new Set(
+    TABS.filter((t) => t.fields.some((f) => JSON.stringify(form[f]) !== JSON.stringify(saved[f]))).map((t) => t.id),
+  );
   const patch = (p: Partial<Settings>) => setForm({ ...form, ...p });
 
   const save = async () => {
@@ -100,7 +214,6 @@ export function SettingsView() {
       const s = await api.saveSettings(form);
       setSaved(s);
       setForm(s);
-      detect(s.claudePath);
       toast.success("Configurações salvas");
     } catch (e) {
       toast.error(String(e));
@@ -111,7 +224,7 @@ export function SettingsView() {
     setTesting(true);
     setTest(null);
     try {
-      setTest({ ok: true, r: await api.testClaude(form) });
+      setTest({ ok: true, r: await api.testAgent(form) });
     } catch (e) {
       setTest({ ok: false, e: String(e) });
     } finally {
@@ -130,282 +243,468 @@ export function SettingsView() {
     })),
   ];
   const customModel = !MODELS.some((m) => m.value === form.claudeModel);
+  const isCodex = form.agent === "codex";
+  const agentInfo = AGENTS.find((a) => a.value === form.agent) ?? AGENTS[0];
+  const inCatalog = (slug: string) => !!codexModels?.some((m) => m.slug === slug);
+  // "Outro…" guarda um espaço até o usuário digitar (vazio significa "padrão do Codex").
+  const codexCustom = form.codexModel !== "" && !inCatalog(form.codexModel);
+  const codexItems = [
+    { value: CODEX_DEFAULT, label: "Padrão do Codex" },
+    ...(codexModels ?? []).map((m) => ({ value: m.slug, label: m.name })),
+    ...(codexCustom && form.codexModel.trim() ? [{ value: form.codexModel, label: form.codexModel.trim() }] : []),
+    { value: CUSTOM, label: "Outro…" },
+  ];
+  const codexSelectValue = form.codexModel === "" ? CODEX_DEFAULT : codexCustom && !form.codexModel.trim() ? CUSTOM : form.codexModel;
+  const codexDescription = codexModels?.find((m) => m.slug === form.codexModel)?.description;
 
   return (
     <div className="flex h-full flex-col">
       <header className="border-b px-8 pt-8 pb-4">
-        <h1 className="mx-auto w-full max-w-2xl text-2xl font-semibold tracking-tight">Configurações</h1>
+        <h1 className="mx-auto w-full max-w-4xl text-2xl font-semibold tracking-tight">Configurações</h1>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
-        <motion.div
-          className="mx-auto flex w-full max-w-2xl flex-col gap-5"
-          initial="hidden"
-          animate="show"
-          variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05, delayChildren: 0.05 } } }}
-        >
-          <Section title="Voz" hint="Grave, transcreva localmente e crie a tarefa. O áudio não sai do seu computador.">
-            <Field
-              label="Modelo de transcrição"
-              hint={
-                !discovery
-                  ? "Procurando modelos…"
-                  : models.length === 0
-                    ? "Nenhum modelo encontrado. Instale o Handy e baixe um modelo. Veja abaixo onde procurei."
-                    : "Modelos do Handy são usados somente para leitura."
-              }
-            >
-              <Select
-                items={modelItems}
-                value={form.sttModelDir ?? AUTO}
-                onValueChange={(v) => patch({ sttModelDir: v === AUTO ? null : (v as string) })}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {modelItems.map((i) => (
-                    <SelectItem key={i.value} value={i.value} disabled={i.disabled}>
-                      {i.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {unsupported.length > 0 && (
-                <p className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-                  <AlertCircle className="mt-px size-3.5 shrink-0" />
-                  <span>
-                    {unsupported.length} modelo{unsupported.length > 1 ? "s" : ""} do Handy não funciona
-                    {unsupported.length > 1 ? "m" : ""} neste build do Prumo: {unsupported[0].reason}.
-                  </span>
-                </p>
-              )}
-              {discovery && (
-                <details className="text-xs text-muted-foreground">
-                  <summary className="cursor-pointer select-none">Onde procurei modelos</summary>
-                  <ul className="mt-1.5 flex flex-col gap-1">
-                    {discovery.searched.map((s) => (
-                      <li key={s.path} className="flex items-start gap-1.5 break-all">
-                        <span className={s.exists ? "text-green-600" : "text-destructive"}>{s.exists ? "✓" : "✗"}</span>
-                        <span>
-                          {s.path}
-                          {!s.exists && " (não existe)"}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-            </Field>
-            <Field label="Atalho global" hint="Clique e pressione a combinação (com Ctrl, ⌘, Alt ou Shift). Vale mesmo com o app em segundo plano.">
-              <Input
-                readOnly
-                value={capturing ? "Pressione o atalho…" : prettyShortcut(form.shortcut)}
-                onFocus={() => setCapturing(true)}
-                onBlur={() => setCapturing(false)}
-                onKeyDown={(e) => {
-                  e.preventDefault();
-                  const a = acceleratorFromEvent(e);
-                  if (a) {
-                    patch({ shortcut: a });
-                    e.currentTarget.blur();
-                  }
-                }}
-                className="max-w-48 cursor-pointer"
-              />
-            </Field>
-            <Field label="Atalho da tarefa rápida" hint="Abre uma janelinha para digitar ou ditar uma tarefa de qualquer app. Precisa ser diferente do atalho de voz.">
-              <Input
-                readOnly
-                value={capturingQuick ? "Pressione o atalho…" : prettyShortcut(form.quickAddShortcut)}
-                onFocus={() => setCapturingQuick(true)}
-                onBlur={() => setCapturingQuick(false)}
-                onKeyDown={(e) => {
-                  e.preventDefault();
-                  const a = acceleratorFromEvent(e);
-                  if (a) {
-                    patch({ quickAddShortcut: a });
-                    e.currentTarget.blur();
-                  }
-                }}
-                className="max-w-48 cursor-pointer"
-              />
-            </Field>
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex flex-col gap-0.5">
-                <Label htmlFor="auto">Adicionar direto à lista</Label>
-                <p className="text-xs text-muted-foreground">
-                  Desligado: tarefas por voz vão para a caixa de entrada, para você conferir a transcrição.
-                </p>
-              </div>
-              <Switch id="auto" checked={form.autoApprove} onCheckedChange={(c) => patch({ autoApprove: c })} />
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex flex-col gap-0.5">
-                <Label htmlFor="reminders">Lembretes com notificação</Label>
-                <p className="text-xs text-muted-foreground">
-                  Avisa no horário das tarefas que têm hora definida.
-                </p>
-              </div>
-              <Switch id="reminders" checked={form.reminders} onCheckedChange={(c) => patch({ reminders: c })} />
-            </div>
-          </Section>
-
-          <Section
-            title="Agentes (MCP e CLI)"
-            hint="Deixe o Claude Code ou o Codex criarem tarefas. Tudo que eles criam cai na caixa de entrada para você aprovar."
+      <div ref={scrollRef} className="@container min-h-0 flex-1 overflow-y-auto px-8 py-6">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 @3xl:flex-row @3xl:items-start @3xl:gap-8">
+          <nav
+            role="tablist"
+            aria-label="Seções das configurações"
+            aria-orientation="vertical"
+            className="-mx-1 flex shrink-0 gap-1 overflow-x-auto px-1 pb-1 @3xl:sticky @3xl:top-0 @3xl:mx-0 @3xl:w-48 @3xl:flex-col @3xl:overflow-visible @3xl:px-0 @3xl:pb-0"
+            onKeyDown={onTabKey}
           >
-            <Field label="Registrar no Claude Code" hint="Rode este comando uma vez no terminal. Se mover o app de pasta, rode de novo.">
-              <div className="flex items-center gap-2">
-                <code className="min-w-0 flex-1 truncate rounded-md border bg-muted px-3 py-2 text-xs">{mcpCmd}</code>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  disabled={!mcpCmd}
-                  onClick={() => navigator.clipboard.writeText(mcpCmd).then(() => toast.success("Comando copiado"))}
+            {TABS.map((t) => {
+              const active = tab === t.id;
+              const Icon = t.icon;
+              return (
+                <button
+                  key={t.id}
+                  id={`tab-${t.id}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  aria-controls="painel-config"
+                  tabIndex={active ? 0 : -1}
+                  onClick={() => selectTab(t.id)}
+                  className={cn(
+                    "relative flex shrink-0 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                    active ? "font-medium text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                  )}
                 >
-                  <Copy className="size-4" />
-                </Button>
-              </div>
-            </Field>
-          </Section>
+                  {active && <motion.span layoutId="config-aba" transition={softSpring} className="absolute inset-0 rounded-md bg-accent" />}
+                  <Icon className="relative size-4 shrink-0" />
+                  <span className="relative flex-1">{t.label}</span>
+                  {dirtyTabs.has(t.id) && (
+                    <span className="relative size-1.5 shrink-0 rounded-full bg-primary" title="Alterações não salvas" aria-label="alterações não salvas" />
+                  )}
+                </button>
+              );
+            })}
+          </nav>
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={tab}
+              id="painel-config"
+              role="tabpanel"
+              aria-labelledby={`tab-${tab}`}
+              className="flex w-full min-w-0 max-w-2xl flex-1 flex-col gap-5"
+              initial="hidden"
+              animate="show"
+              exit={{ opacity: 0, transition: { duration: DUR_FAST } }}
+              variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05 } } }}
+            >
+              {tab === "geral" && (
+                <>
+                  <Section title="Lembretes" hint="Avisos no horário das tarefas que têm hora definida.">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex flex-col gap-0.5">
+                        <Label htmlFor="reminders">Lembretes com notificação</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Notificação do Windows, com som, no horário da tarefa.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            api
+                              .testReminder()
+                              .then(() => toast.success("Notificação enviada"))
+                              .catch((e) => toast.error(`Falhou: ${e}`))
+                          }
+                        >
+                          Testar
+                        </Button>
+                        <Switch id="reminders" checked={form.reminders} onCheckedChange={(c) => patch({ reminders: c })} />
+                      </div>
+                    </div>
+                  </Section>
 
-          <Section title="Claude" hint="Interpreta o que você disse (título e data) usando a CLI do Claude Code, com a sua assinatura.">
-            <div className="flex items-start gap-2 text-sm">
-              {claude?.version ? (
-                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-green-600" />
-              ) : (
-                <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
+                  <Section title="Inicialização" hint="Os lembretes só disparam com o Prumo aberto (fechar a janela o mantém na bandeja).">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex flex-col gap-0.5">
+                        <Label htmlFor="launch">Abrir com o sistema</Label>
+                        <p className="text-xs text-muted-foreground">Inicia o Prumo quando você entra no computador.</p>
+                      </div>
+                      <Switch id="launch" checked={form.launchAtLogin} onCheckedChange={(c) => patch({ launchAtLogin: c })} />
+                    </div>
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex flex-col gap-0.5">
+                        <Label htmlFor="minimized">Iniciar minimizado</Label>
+                        <p className="text-xs text-muted-foreground">Ao abrir com o sistema, fica só na bandeja, sem mostrar a janela.</p>
+                      </div>
+                      <Switch
+                        id="minimized"
+                        disabled={!form.launchAtLogin}
+                        checked={form.startMinimized}
+                        onCheckedChange={(c) => patch({ startMinimized: c })}
+                      />
+                    </div>
+                  </Section>
+                </>
               )}
-              <div className="min-w-0">
-                <p>{claude?.version ? `Claude Code ${claude.version}` : (claude?.error ?? "Procurando…")}</p>
-                {claude?.path && <p className="truncate text-xs text-muted-foreground">{claude.path}</p>}
-              </div>
-            </div>
-            <Field label="Caminho da CLI (opcional)" hint="Deixe vazio para detectar automaticamente.">
-              <Input
-                value={form.claudePath ?? ""}
-                onChange={(e) => patch({ claudePath: e.target.value || null })}
-                placeholder="/Users/você/.local/bin/claude"
-              />
-            </Field>
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-4">
-              <Field label="Modelo">
-                <Select
-                  items={[...MODELS, ...(customModel ? [{ value: form.claudeModel, label: form.claudeModel }] : []), { value: CUSTOM, label: "Outro…" }]}
-                  value={form.claudeModel}
-                  onValueChange={(v) => patch({ claudeModel: v === CUSTOM ? "" : (v as string) })}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MODELS.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>
-                        {m.label}
-                      </SelectItem>
-                    ))}
-                    {customModel && form.claudeModel && <SelectItem value={form.claudeModel}>{form.claudeModel}</SelectItem>}
-                    <SelectItem value={CUSTOM}>Outro…</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Esforço">
-                <Select items={EFFORTS} value={form.claudeEffort} onValueChange={(v) => patch({ claudeEffort: v as string })}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {EFFORTS.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>
-                        {m.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            </div>
-            {(customModel || form.claudeModel === "") && (
-              <Field label="Nome do modelo" hint="Alias (sonnet) ou id completo, como claude-sonnet-5-5.">
-                <Input value={form.claudeModel} onChange={(e) => patch({ claudeModel: e.target.value })} placeholder="claude-haiku-5-5" />
-              </Field>
-            )}
-            <div className="flex flex-wrap items-center gap-3">
-              <Button variant="outline" onClick={runTest} disabled={testing}>
-                {testing ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <FlaskConical data-icon="inline-start" />}
-                Testar interpretação
-              </Button>
-              {!test && !testing && (
-                <p className="text-xs text-muted-foreground">Usa a frase “ligar para o João amanhã de manhã”.</p>
+              {tab === "voz" && (
+                <>
+                  <Section title="Voz" hint="Grave, transcreva localmente e crie a tarefa. O áudio não sai do seu computador.">
+                    <Field
+                      label="Modelo de transcrição"
+                      hint={
+                        !discovery
+                          ? "Procurando modelos…"
+                          : models.length === 0
+                            ? "Nenhum modelo encontrado. Instale o Handy e baixe um modelo. Veja abaixo onde procurei."
+                            : "Modelos do Handy são usados somente para leitura."
+                      }
+                    >
+                      <Select
+                        items={modelItems}
+                        value={form.sttModelDir ?? AUTO}
+                        onValueChange={(v) => patch({ sttModelDir: v === AUTO ? null : (v as string) })}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {modelItems.map((i) => (
+                            <SelectItem key={i.value} value={i.value} disabled={i.disabled}>
+                              {i.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {unsupported.length > 0 && (
+                        <p className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+                          <AlertCircle className="mt-px size-3.5 shrink-0" />
+                          <span>
+                            {unsupported.length} modelo{unsupported.length > 1 ? "s" : ""} do Handy não funciona
+                            {unsupported.length > 1 ? "m" : ""} neste build do Prumo: {unsupported[0].reason}.
+                          </span>
+                        </p>
+                      )}
+                      {discovery && (
+                        <details className="text-xs text-muted-foreground">
+                          <summary className="cursor-pointer select-none">Onde procurei modelos</summary>
+                          <ul className="mt-1.5 flex flex-col gap-1">
+                            {discovery.searched.map((s) => (
+                              <li key={s.path} className="flex items-start gap-1.5 break-all">
+                                <span className={s.exists ? "text-green-600" : "text-destructive"}>{s.exists ? "✓" : "✗"}</span>
+                                <span>
+                                  {s.path}
+                                  {!s.exists && " (não existe)"}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
+                    </Field>
+                    <Field label="Atalho global" hint="Clique e pressione a combinação (com Ctrl, ⌘, Alt ou Shift). Vale mesmo com o app em segundo plano.">
+                      <Input
+                        readOnly
+                        value={capturing ? "Pressione o atalho…" : prettyShortcut(form.shortcut)}
+                        onFocus={() => setCapturing(true)}
+                        onBlur={() => setCapturing(false)}
+                        onKeyDown={(e) => {
+                          e.preventDefault();
+                          const a = acceleratorFromEvent(e);
+                          if (a) {
+                            patch({ shortcut: a });
+                            e.currentTarget.blur();
+                          }
+                        }}
+                        className="max-w-48 cursor-pointer"
+                      />
+                    </Field>
+                    <Field label="Atalho da tarefa rápida" hint="Abre uma janelinha para digitar ou ditar uma tarefa de qualquer app. Precisa ser diferente do atalho de voz.">
+                      <Input
+                        readOnly
+                        value={capturingQuick ? "Pressione o atalho…" : prettyShortcut(form.quickAddShortcut)}
+                        onFocus={() => setCapturingQuick(true)}
+                        onBlur={() => setCapturingQuick(false)}
+                        onKeyDown={(e) => {
+                          e.preventDefault();
+                          const a = acceleratorFromEvent(e);
+                          if (a) {
+                            patch({ quickAddShortcut: a });
+                            e.currentTarget.blur();
+                          }
+                        }}
+                        className="max-w-48 cursor-pointer"
+                      />
+                    </Field>
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex flex-col gap-0.5">
+                        <Label htmlFor="auto">Adicionar direto à lista</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Desligado: tarefas por voz vão para a caixa de entrada, para você conferir a transcrição.
+                        </p>
+                      </div>
+                      <Switch id="auto" checked={form.autoApprove} onCheckedChange={(c) => patch({ autoApprove: c })} />
+                    </div>
+                  </Section>
+                </>
               )}
-              <AnimatePresence mode="wait" initial={false}>
-                {test?.ok && (
-                  <motion.p
-                    key="ok"
-                    className="text-sm text-muted-foreground"
-                    initial={{ opacity: 0, x: -6 }}
-                    animate={{ opacity: 1, x: 0, transition: { duration: DUR_BASE, ease: easeOut } }}
-                    exit={{ opacity: 0, transition: { duration: DUR_FAST } }}
+              {tab === "ia" && (
+                <>
+                  <Section
+                    title="Interpretação"
+                    hint="Transforma o que você fala ou digita na tarefa rápida em tarefas, com data e horário. Uma frase pode virar várias tarefas."
                   >
-                    {test.r.title} · {test.r.date ?? "sem data"} · {(test.r.ms / 1000).toFixed(1)} s
-                  </motion.p>
-                )}
-                {test && !test.ok && (
-                  <motion.p
-                    key="erro"
-                    className="text-sm text-destructive"
-                    initial={{ opacity: 0, x: -6 }}
-                    animate={{ opacity: 1, x: 0, transition: { duration: DUR_BASE, ease: easeOut } }}
-                    exit={{ opacity: 0, transition: { duration: DUR_FAST } }}
-                  >
-                    {test.e}
-                  </motion.p>
-                )}
-              </AnimatePresence>
-            </div>
-          </Section>
-
-          <Section title="Diagnóstico" hint="O Prumo grava um arquivo de log (prumo.log) com cada etapa da voz. Se o app fechar sozinho, a última linha mostra onde parou.">
-            <div>
-              <Button
-                variant="outline"
-                onClick={() => api.openLogs().catch((e) => toast.error(String(e)))}
-              >
-                <FolderOpen data-icon="inline-start" />
-                Abrir pasta de logs
-              </Button>
-            </div>
-          </Section>
-
-          <Section title="Aparência">
-            <div role="group" aria-label="Tema" className="inline-flex gap-1 self-start rounded-lg border bg-muted/50 p-1">
-              {THEMES.map((t) => {
-                const active = theme === t.value;
-                return (
-                  <motion.button
-                    key={t.value}
-                    type="button"
-                    aria-pressed={active}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={(e) => changeTheme(t.value, centerOf(e.currentTarget))}
-                    className={`relative rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${active ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                  >
-                    {active && (
-                      <motion.span layoutId="tema-ativo" transition={softSpring} className="absolute inset-0 rounded-md bg-primary" />
+                    <div role="radiogroup" aria-label="Agente" className="inline-flex gap-1 self-start rounded-lg border bg-muted/50 p-1">
+                      {AGENTS.map((a) => {
+                        const active = form.agent === a.value;
+                        return (
+                          <motion.button
+                            key={a.value}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => patch({ agent: a.value })}
+                            className={`relative rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${active ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                          >
+                            {active && (
+                              <motion.span layoutId="agente-ativo" transition={softSpring} className="absolute inset-0 rounded-md bg-primary" />
+                            )}
+                            <span className="relative">{a.label}</span>
+                          </motion.button>
+                        );
+                      })}
+                    </div>
+                    <p className="-mt-2 text-xs text-muted-foreground">{agentInfo.hint}</p>
+                    <div className="flex items-start gap-2 text-sm">
+                      {status?.version ? (
+                        <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-green-600" />
+                      ) : status ? (
+                        <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
+                      ) : (
+                        <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" />
+                      )}
+                      <div className="min-w-0">
+                        <p>{status?.version ? `${agentInfo.label} ${status.version}` : (status?.error ?? "Procurando…")}</p>
+                        {status?.path && <p className="truncate text-xs text-muted-foreground">{status.path}</p>}
+                      </div>
+                    </div>
+                    <Field label="Caminho da CLI (opcional)" hint="Deixe vazio para detectar automaticamente.">
+                      {isCodex ? (
+                        <Input
+                          value={form.codexPath ?? ""}
+                          onChange={(e) => patch({ codexPath: e.target.value || null })}
+                          placeholder="C:\Users\você\AppData\Roaming\npm\codex.cmd"
+                        />
+                      ) : (
+                        <Input
+                          value={form.claudePath ?? ""}
+                          onChange={(e) => patch({ claudePath: e.target.value || null })}
+                          placeholder="/Users/você/.local/bin/claude"
+                        />
+                      )}
+                    </Field>
+                    <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-4">
+                      {isCodex ? (
+                        <Field label="Modelo" hint={codexModels === null ? "Lendo os modelos do Codex…" : codexDescription}>
+                          <Select
+                            items={codexItems}
+                            value={codexSelectValue}
+                            onValueChange={(v) =>
+                              patch({ codexModel: v === CODEX_DEFAULT ? "" : v === CUSTOM ? " " : (v as string) })
+                            }
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {codexItems.map((m) => (
+                                <SelectItem key={m.value} value={m.value}>
+                                  {m.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                      ) : (
+                        <Field label="Modelo">
+                          <Select
+                            items={[...MODELS, ...(customModel ? [{ value: form.claudeModel, label: form.claudeModel }] : []), { value: CUSTOM, label: "Outro…" }]}
+                            value={form.claudeModel}
+                            onValueChange={(v) => patch({ claudeModel: v === CUSTOM ? "" : (v as string) })}
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {MODELS.map((m) => (
+                                <SelectItem key={m.value} value={m.value}>
+                                  {m.label}
+                                </SelectItem>
+                              ))}
+                              {customModel && form.claudeModel && <SelectItem value={form.claudeModel}>{form.claudeModel}</SelectItem>}
+                              <SelectItem value={CUSTOM}>Outro…</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                      )}
+                      <Field label="Esforço">
+                        <Select
+                          items={EFFORTS}
+                          value={isCodex ? form.codexEffort : form.claudeEffort}
+                          onValueChange={(v) => patch(isCodex ? { codexEffort: v as string } : { claudeEffort: v as string })}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {EFFORTS.map((m) => (
+                              <SelectItem key={m.value} value={m.value}>
+                                {m.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                    </div>
+                    {!isCodex && (customModel || form.claudeModel === "") && (
+                      <Field label="Nome do modelo" hint="Alias (sonnet) ou id completo, como claude-sonnet-5-5.">
+                        <Input value={form.claudeModel} onChange={(e) => patch({ claudeModel: e.target.value })} placeholder="claude-haiku-5-5" />
+                      </Field>
                     )}
-                    <span className="relative">{t.label}</span>
-                  </motion.button>
-                );
-              })}
-            </div>
-          </Section>
-        </motion.div>
+                    {isCodex && codexCustom && (
+                      <Field label="Nome do modelo" hint="Slug do modelo da OpenAI, como aparece em `codex debug models`.">
+                        <Input
+                          value={form.codexModel.trim()}
+                          onChange={(e) => patch({ codexModel: e.target.value.trim() || " " })}
+                          placeholder="gpt-6.1-sol"
+                        />
+                      </Field>
+                    )}
+                    <div className="flex flex-col gap-2">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <Button variant="outline" onClick={runTest} disabled={testing}>
+                          {testing ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <FlaskConical data-icon="inline-start" />}
+                          Testar interpretação
+                        </Button>
+                        {!test && !testing && (
+                          <p className="text-xs text-muted-foreground">
+                            Usa “amanhã dentista às 16 e mercado às 18, depois de amanhã viajar a Porto Alegre”.
+                          </p>
+                        )}
+                        {test?.ok && <p className="text-xs text-muted-foreground">{(test.r.ms / 1000).toFixed(1)} s</p>}
+                      </div>
+                      <AnimatePresence mode="wait" initial={false}>
+                        {test?.ok && (
+                          <motion.ul
+                            key="ok"
+                            className="flex flex-col gap-1 text-sm text-muted-foreground"
+                            initial={{ opacity: 0, x: -6 }}
+                            animate={{ opacity: 1, x: 0, transition: { duration: DUR_BASE, ease: easeOut } }}
+                            exit={{ opacity: 0, transition: { duration: DUR_FAST } }}
+                          >
+                            {test.r.tasks.map((t, i) => (
+                              <li key={i}>
+                                <span className="text-foreground">{t.title}</span> · {t.date ?? "sem data"}
+                                {t.time ? ` · ${t.time}` : ""}
+                              </li>
+                            ))}
+                          </motion.ul>
+                        )}
+                        {test && !test.ok && (
+                          <motion.p
+                            key="erro"
+                            className="text-sm text-destructive"
+                            initial={{ opacity: 0, x: -6 }}
+                            animate={{ opacity: 1, x: 0, transition: { duration: DUR_BASE, ease: easeOut } }}
+                            exit={{ opacity: 0, transition: { duration: DUR_FAST } }}
+                          >
+                            {test.e}
+                          </motion.p>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </Section>
+                </>
+              )}
+              {tab === "agentes" && (
+                <>
+                  <Section
+                    title="Agentes (MCP e CLI)"
+                    hint="Deixe o Claude Code ou o Codex criarem tarefas. Tudo que eles criam cai na caixa de entrada para você aprovar."
+                  >
+                    <CommandRow label="Registrar no Claude Code" cmd={mcpCmd?.claude ?? ""} />
+                    <CommandRow label="Registrar no Codex" cmd={mcpCmd?.codex ?? ""} />
+                  </Section>
+                </>
+              )}
+              {tab === "aparencia" && (
+                <>
+                  <Section title="Aparência">
+                    <div role="group" aria-label="Tema" className="inline-flex gap-1 self-start rounded-lg border bg-muted/50 p-1">
+                      {THEMES.map((t) => {
+                        const active = theme === t.value;
+                        return (
+                          <motion.button
+                            key={t.value}
+                            type="button"
+                            aria-pressed={active}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={(e) => changeTheme(t.value, centerOf(e.currentTarget))}
+                            className={`relative rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${active ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                          >
+                            {active && (
+                              <motion.span layoutId="tema-ativo" transition={softSpring} className="absolute inset-0 rounded-md bg-primary" />
+                            )}
+                            <span className="relative">{t.label}</span>
+                          </motion.button>
+                        );
+                      })}
+                    </div>
+                  </Section>
+                </>
+              )}
+              {tab === "diagnostico" && (
+                <>
+                  <Section title="Diagnóstico" hint="O Prumo grava um arquivo de log (prumo.log) com cada etapa da voz. Se o app fechar sozinho, a última linha mostra onde parou.">
+                    <div>
+                      <Button
+                        variant="outline"
+                        onClick={() => api.openLogs().catch((e) => toast.error(String(e)))}
+                      >
+                        <FolderOpen data-icon="inline-start" />
+                        Abrir pasta de logs
+                      </Button>
+                    </div>
+                  </Section>
+                </>
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </div>
       </div>
+
       <footer className="border-t bg-background px-8 py-3">
-        <div className="mx-auto flex w-full max-w-2xl justify-end gap-2">
+        <div className="mx-auto flex w-full max-w-4xl justify-end gap-2">
           <Button variant="ghost" disabled={!dirty} onClick={() => setForm(saved)}>
             Descartar
           </Button>
-          <Button disabled={!dirty || !form.claudeModel.trim()} onClick={save}>
+          <Button disabled={!dirty || (!isCodex && !form.claudeModel.trim()) || (isCodex && codexCustom && !form.codexModel.trim())} onClick={save}>
             Salvar alterações
           </Button>
         </div>

@@ -50,11 +50,19 @@ export function useVoice(
         const where = r.inbox ? "Está na caixa de entrada." : "Adicionada à lista.";
         if (r.fallback) {
           toast.warning(`Criada com o texto bruto: ${r.title}`, {
-            description: `Não consegui interpretar com o Claude (${r.warning}). ${where}`,
+            description: `Não consegui interpretar (${r.warning}). ${where}`,
             duration: 8000,
           });
+        } else if (r.tasks.length > 1) {
+          const lista = r.tasks.map((t) => [t.title, t.date, t.time].filter(Boolean).join(" · ")).join("\n");
+          toast.success(`${r.tasks.length} tarefas criadas`, {
+            description: `${lista}\n${where}`,
+            duration: 8000,
+            classNames: { description: "whitespace-pre-line" },
+          });
         } else {
-          toast.success(`${r.title}${when}`, { description: `“${r.transcript}” — ${where}` });
+          const hora = r.tasks[0]?.time ? ` · ${r.tasks[0].time}` : "";
+          toast.success(`${r.title}${when}${hora}`, { description: `“${r.transcript}” — ${where}` });
         }
       }
       onCreated(r);

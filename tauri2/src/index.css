@@ -145,6 +145,40 @@
     @apply font-sans;
     }
 }
+/* ---------- Barras de rolagem ----------
+   Uma barra só para o app inteiro: fina, sem as setas do Windows, trilho transparente e o
+   polegar na cor primária (âmbar). Usa os pseudo-elementos ::-webkit-scrollbar porque o
+   WebView2 (Chromium) e o WKWebView os respeitam; NÃO declare `scrollbar-color` ou
+   `scrollbar-width` em elementos: no Chromium eles desligam estas regras. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+::-webkit-scrollbar-thumb {
+  /* A borda transparente + background-clip deixa o polegar com ~4px, com folga nas laterais. */
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background-clip: padding-box;
+  background-color: color-mix(in oklab, var(--primary) 45%, transparent);
+  transition: background-color 150ms;
+}
+::-webkit-scrollbar-thumb:hover {
+  border-width: 2px;
+  background-color: color-mix(in oklab, var(--primary) 80%, transparent);
+}
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--primary);
+}
+
 /* ---------- Editor de notas (Tiptap) ---------- */
 .note-editor { display: flex; flex-direction: column; }
 .note-editor .ProseMirror {

@@ -24,6 +24,8 @@ pub struct TaskView {
     pub title: String,
     pub notes: String,
     pub due_date: Option<String>,
+    /// Horário "HH:MM" (24 h); dispara um lembrete no app.
+    pub due_time: Option<String>,
     pub done: bool,
     pub status: String,
     pub source: String,
@@ -87,6 +89,11 @@ impl Filter {
 }
 
 /// Aceita `YYYY-MM-DD`, `hoje` ou `amanhã`/`amanha` (e `today`/`tomorrow`).
+/// Horário "HH:MM" em 24 h (aceita "9:30").
+pub fn parse_time(s: &str) -> Result<String> {
+    tarefas_core::parse_hhmm(s).ok_or_else(|| format!("horário inválido: {s} (use HH:MM, ex.: 16:00)"))
+}
+
 pub fn parse_date(s: &str) -> Result<String> {
     let t = s.trim().to_lowercase();
     match t.as_str() {
@@ -118,6 +125,7 @@ fn view(db: &Db, t: Task) -> Result<TaskView> {
         title: t.title,
         notes: t.notes,
         due_date: t.due_date,
+        due_time: t.due_time,
         done: t.done,
         status: t.status,
         source: t.source,
@@ -148,6 +156,7 @@ pub fn add(
     title: &str,
     notes: Option<&str>,
     due: Option<&str>,
+    time: Option<&str>,
     tags: &[String],
 ) -> Result<TaskView> {
     if source == "manual" {
@@ -158,9 +167,16 @@ pub fn add(
         return Err("o título não pode ser vazio".into());
     }
     let due = due.map(parse_date).transpose()?;
+    let time = time.map(str::trim).filter(|t| !t.is_empty()).map(parse_time).transpose()?;
+    if time.is_some() && due.is_none() {
+        return Err("o horário precisa de uma data (due_date)".into());
+    }
     let id = db
         .add_task_from(title, notes.unwrap_or(""), due.as_deref(), source)
         .map_err(e)?;
+    if let Some(t) = &time {
+        db.set_due_time(id, Some(t)).map_err(e)?;
+    }
     if !tags.is_empty() {
         db.set_task_tags(id, tags).map_err(e)?;
     }
@@ -199,12 +215,14 @@ pub fn search(db: &Db, query: &str) -> Result<Vec<TaskView>> {
 }
 
 /// Atualiza só os campos informados. `due`: string vazia remove a data.
+#[allow(clippy::too_many_arguments)] // espelha os campos opcionais do update_task do MCP
 pub fn update(
     db: &Db,
     id: i64,
     title: Option<&str>,
     notes: Option<&str>,
     due: Option<&str>,
+    time: Option<&str>,
     tags: Option<&[String]>,
     priority: Option<i64>,
 ) -> Result<TaskView> {
@@ -220,7 +238,19 @@ pub fn update(
         Some(d) => Some(parse_date(d)?),
         None => cur.due_date.clone(),
     };
+    // Some("") remove o horário; None mantém o atual.
+    let due_time = match time {
+        Some(t) if t.trim().is_empty() => None,
+        Some(t) => Some(parse_time(t)?),
+        None => cur.due_time.clone(),
+    };
+    if due_time.is_some() && due_date.is_none() {
+        return Err("o horário precisa de uma data (due_date)".into());
+    }
     db.update_task(id, &title, &notes, due_date.as_deref()).map_err(e)?;
+    if due_time != cur.due_time {
+        db.set_due_time(id, due_time.as_deref()).map_err(e)?;
+    }
     if let Some(tags) = tags {
         db.set_task_tags(id, tags).map_err(e)?;
     }
@@ -321,8 +351,10 @@ pub fn tags(db: &Db) -> Result<Vec<TagView>> {
 pub fn render_task(t: &TaskView) -> String {
     let mark = if t.done { "[x]" } else { "[ ]" };
     let mut s = format!("{mark} #{} {}", t.id, t.title);
-    if let Some(d) = &t.due_date {
-        s.push_str(&format!("  ({d})"));
+    match (&t.due_date, &t.due_time) {
+        (Some(d), Some(h)) => s.push_str(&format!("  ({d} {h})")),
+        (Some(d), None) => s.push_str(&format!("  ({d})")),
+        _ => {}
     }
     for g in &t.tags {
         s.push_str(&format!("  #{g}"));
@@ -382,7 +414,7 @@ mod tests {
     #[test]
     fn add_goes_to_inbox_not_today() {
         let db = Db::open_in_memory().unwrap();
-        let t = add(&db, SOURCE_CLI, " Comprar pão ", Some("n"), Some("hoje"), &tags_of(&["casa"])).unwrap();
+        let t = add(&db, SOURCE_CLI, " Comprar pão ", Some("n"), Some("hoje"), None, &tags_of(&["casa"])).unwrap();
         assert_eq!(t.title, "Comprar pão");
         assert_eq!(t.status, "inbox");
         assert_eq!(t.source, "cli");
@@ -392,9 +424,31 @@ mod tests {
         assert!(list(&db, Filter::All).unwrap().is_empty());
         assert_eq!(list(&db, Filter::Inbox).unwrap().len(), 1);
 
-        let m = add(&db, SOURCE_MCP, "x", None, None, &[]).unwrap();
+        let m = add(&db, SOURCE_MCP, "x", None, None, None, &[]).unwrap();
         assert_eq!((m.status.as_str(), m.source.as_str()), ("inbox", "mcp"));
-        assert!(add(&db, "manual", "y", None, None, &[]).is_err());
+        assert!(add(&db, "manual", "y", None, None, None, &[]).is_err());
+    }
+
+    #[test]
+    fn horario_no_add_e_no_update() {
+        let db = Db::open_in_memory().unwrap();
+        let t = add(&db, SOURCE_MCP, "Dentista", None, Some("2026-11-18"), Some("9:30"), &[]).unwrap();
+        assert_eq!(t.due_time.as_deref(), Some("09:30"));
+        assert!(render_task(&t).contains("(2026-11-18 09:30)"));
+        // Horário sem data, ou inválido, é recusado antes de criar.
+        assert!(add(&db, SOURCE_MCP, "Sem data", None, None, Some("10:00"), &[]).is_err());
+        assert!(add(&db, SOURCE_MCP, "Hora ruim", None, Some("2026-11-18"), Some("16h"), &[]).is_err());
+        // update: muda, mantém (None) e remove ("").
+        let u = update(&db, t.id, None, None, None, Some("16:00"), None, None).unwrap();
+        assert_eq!(u.due_time.as_deref(), Some("16:00"));
+        let u = update(&db, t.id, Some("Dentista (retorno)"), None, None, None, None, None).unwrap();
+        assert_eq!(u.due_time.as_deref(), Some("16:00"));
+        let u = update(&db, t.id, None, None, None, Some(""), None, None).unwrap();
+        assert_eq!(u.due_time, None);
+        // Remover a data de uma tarefa com horário exige remover o horário junto.
+        update(&db, t.id, None, None, None, Some("08:00"), None, None).unwrap();
+        assert!(update(&db, t.id, None, None, Some(""), None, None, None).is_err());
+        assert!(update(&db, t.id, None, None, Some(""), Some(""), None, None).unwrap().due_date.is_none());
     }
 
     #[test]
@@ -404,21 +458,21 @@ mod tests {
         assert!(parse_date("2026-13-01").is_err());
         assert!(parse_date("abc").is_err());
         let db = Db::open_in_memory().unwrap();
-        assert!(add(&db, SOURCE_CLI, "x", None, Some("31/12"), &[]).is_err());
-        assert!(add(&db, SOURCE_CLI, "  ", None, None, &[]).is_err());
+        assert!(add(&db, SOURCE_CLI, "x", None, Some("31/12"), None, &[]).is_err());
+        assert!(add(&db, SOURCE_CLI, "  ", None, None, None, &[]).is_err());
     }
 
     #[test]
     fn complete_search_update_subtask_tags() {
         let db = Db::open_in_memory().unwrap();
-        let a = add(&db, SOURCE_MCP, "Pagar conta de luz", None, Some("2026-01-01"), &tags_of(&["Casa"])).unwrap();
+        let a = add(&db, SOURCE_MCP, "Pagar conta de luz", None, Some("2026-01-01"), None, &tags_of(&["Casa"])).unwrap();
         db.approve_task(a.id).unwrap();
 
         assert_eq!(list(&db, Filter::Overdue).unwrap().len(), 1);
         assert_eq!(search(&db, "luz").unwrap().len(), 1);
         assert_eq!(tags(&db).unwrap(), [TagView { name: "Casa".into(), count: 1 }]);
 
-        let u = update(&db, a.id, Some("Pagar luz"), None, Some(""), Some(&tags_of(&["x"])), Some(3)).unwrap();
+        let u = update(&db, a.id, Some("Pagar luz"), None, Some(""), None, Some(&tags_of(&["x"])), Some(3)).unwrap();
         assert_eq!((u.title.as_str(), u.due_date.clone(), u.priority), ("Pagar luz", None, 3));
         assert_eq!(u.tags, ["x"]);
 
@@ -435,7 +489,7 @@ mod tests {
     #[test]
     fn show_has_notes_subtasks_and_attachments() {
         let db = Db::open_in_memory().unwrap();
-        let t = add(&db, SOURCE_CLI, "Corrigir bug", Some("passos:\n[Image #1]"), None, &[]).unwrap();
+        let t = add(&db, SOURCE_CLI, "Corrigir bug", Some("passos:\n[Image #1]"), None, None, &[]).unwrap();
         add_subtask(&db, t.id, "reproduzir").unwrap();
         let dir = std::env::temp_dir().join(format!("prumo-cli-show-{}", std::process::id()));
         db.add_attachment_bytes(t.id, "image-1.png", b"\x89PNG", &dir).unwrap();
@@ -457,7 +511,7 @@ mod tests {
     #[test]
     fn append_notes_keeps_existing_text() {
         let db = Db::open_in_memory().unwrap();
-        let t = add(&db, SOURCE_MCP, "Revisar", None, None, &[]).unwrap();
+        let t = add(&db, SOURCE_MCP, "Revisar", None, None, None, &[]).unwrap();
         let a = append_notes(&db, t.id, "  ## Contexto\n\n- [ ] item  \n").unwrap();
         assert_eq!(a.notes, "## Contexto\n\n- [ ] item");
         let b = append_notes(&db, t.id, "Mais um parágrafo").unwrap();
@@ -473,7 +527,7 @@ mod tests {
     #[test]
     fn attach_image_numbers_and_validates() {
         let db = Db::open_in_memory().unwrap();
-        let t = add(&db, SOURCE_MCP, "Com print", None, None, &[]).unwrap();
+        let t = add(&db, SOURCE_MCP, "Com print", None, None, None, &[]).unwrap();
         let dir = std::env::temp_dir().join(format!("prumo-attach-img-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let ok = dir.join("captura.PNG");

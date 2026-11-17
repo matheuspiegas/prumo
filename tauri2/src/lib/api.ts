@@ -36,13 +36,21 @@ export type Counts = { today: number; tomorrow: number; inbox: number };
 
 export type Settings = {
   sttModelDir: string | null;
+  /** Quem interpreta voz e tarefa rápida. */
+  agent: Agent;
   claudeModel: string;
   claudeEffort: string;
   claudePath: string | null;
+  /** Slug do modelo; "" = padrão do Codex. */
+  codexModel: string;
+  codexEffort: string;
+  codexPath: string | null;
   autoApprove: boolean;
   shortcut: string;
   quickAddShortcut: string;
   reminders: boolean;
+  launchAtLogin: boolean;
+  startMinimized: boolean;
 };
 export type ModelInfo = {
   id: string;
@@ -61,12 +69,22 @@ export type Discovery = {
   /** Onde procuramos modelos (ajuda a diagnosticar lista vazia). */
   searched: { path: string; exists: boolean }[];
 };
-export type ClaudeStatus = { path: string | null; version: string | null; error: string | null };
-export type ClaudeTest = { title: string; date: string | null; notes: string; ms: number };
+export type Agent = "claude" | "codex";
+export type AgentStatus = { path: string | null; version: string | null; error: string | null };
+/** Tarefa extraída pelo agente. */
+export type ParsedTask = { title: string; date: string | null; time: string | null; notes: string };
+export type AgentTest = { tasks: ParsedTask[]; ms: number };
+export type CodexModel = { slug: string; name: string; description: string; defaultEffort: string | null };
+export type McpCommands = { claude: string; codex: string };
+/** Tarefa criada pela voz ou pela tarefa rápida. */
+export type CreatedTask = { id: number; title: string; date: string | null; time: string | null };
+export type QuickAddResult = { tasks: CreatedTask[]; warning: string | null };
 export type VoiceResult = {
   transcript: string;
+  /** Primeira tarefa criada. */
   title: string;
   date: string | null;
+  tasks: CreatedTask[];
   fallback: boolean;
   warning: string | null;
   taskId: number;
@@ -74,6 +92,8 @@ export type VoiceResult = {
 };
 
 export type TrashItem = { task: Task; daysAgo: number; daysLeft: number };
+/** Tarefa concluída e o instante local da conclusão ("YYYY-MM-DD HH:MM"). */
+export type CompletedItem = { task: Task; completedAt: string };
 
 /** Quadro branco (ver docs/plano-quadros.md). A cena em si (JSON do Excalidraw) fica em arquivo, não aqui. */
 export type Board = { id: number; name: string; createdAt: string; updatedAt: string; hasThumbnail: boolean };
@@ -122,6 +142,9 @@ export const api = {
   search: (query: string) => invoke<Task[]>("search_tasks", { query }),
   reorder: (ids: number[]) => invoke<void>("reorder_tasks", { ids }),
   overdue: () => invoke<Task[]>("list_overdue"),
+  /** Concluídas no período (datas locais inclusivas; null = sem limite), da mais recente para a mais antiga. */
+  listCompleted: (from: string | null, to: string | null) => invoke<CompletedItem[]>("list_completed", { from, to }),
+  countCompleted: (from: string | null, to: string | null) => invoke<number>("count_completed", { from, to }),
   /** Sem `id`, reagenda todas as atrasadas para hoje. */
   rescheduleToToday: (id?: number) => invoke<void>("reschedule_to_today", { id: id ?? null }),
   setPriority: (id: number, priority: number) => invoke<void>("set_priority", { id, priority }),
@@ -131,16 +154,21 @@ export const api = {
   reorderSubtasks: (parentId: number, ids: number[]) => invoke<void>("reorder_subtasks", { parentId, ids }),
   quickAdd: (title: string, date: string | null, time: string | null = null) =>
     invoke<number>("quick_add_task", { title, date, time }),
+  /** Texto livre interpretado pelo agente (pode virar várias tarefas); data/hora são o padrão. */
+  quickAddSmart: (text: string, date: string | null, time: string | null) =>
+    invoke<QuickAddResult>("quick_add_smart", { text, date, time }),
   setTime: (id: number, time: string | null) => invoke<void>("set_task_time", { id, time }),
   openLogs: () => invoke<string>("open_logs"),
+  testReminder: () => invoke<void>("test_reminder"),
   voiceStart: () => invoke<void>("voice_start"),
   voiceStop: () => invoke<VoiceResult>("voice_stop"),
   voiceCancel: () => invoke<void>("voice_cancel"),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
   models: () => invoke<Discovery>("discover_models"),
-  detectClaude: (path: string | null) => invoke<ClaudeStatus>("detect_claude", { path }),
-  mcpCommand: () => invoke<string>("mcp_command"),
+  detectAgent: (agent: Agent, path: string | null) => invoke<AgentStatus>("detect_agent", { agent, path }),
+  codexModels: (path: string | null) => invoke<CodexModel[]>("codex_models", { path }),
+  mcpCommand: () => invoke<McpCommands>("mcp_command"),
   /** Quadros: o backend emite o evento `boards-changed` ao criar, renomear, duplicar ou excluir. */
   boards: {
     list: () => invoke<Board[]>("list_boards"),
@@ -167,7 +195,7 @@ export const api = {
     /** Bytes de uma imagem (png, jpg, gif, webp, svg, bmp) ou `.excalidrawlib` solta no quadro, até 25 MB. */
     readDroppedFile: (path: string) => invoke<ArrayBuffer>("read_dropped_file", { path }),
   },
-  testClaude: (settings: Settings) => invoke<ClaudeTest>("test_claude", { settings }),
+  testAgent: (settings: Settings) => invoke<AgentTest>("test_agent", { settings }),
 };
 
 const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
