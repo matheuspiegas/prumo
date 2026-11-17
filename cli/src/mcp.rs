@@ -21,6 +21,8 @@ pub struct AddTaskArgs {
     pub notes: Option<String>,
     /// Data de vencimento no formato YYYY-MM-DD (opcional).
     pub due_date: Option<String>,
+    /// Horário HH:MM em 24 h (opcional; exige due_date). O app avisa com uma notificação nesse horário.
+    pub due_time: Option<String>,
     /// Etiquetas (opcional).
     pub tags: Option<Vec<String>>,
 }
@@ -53,6 +55,8 @@ pub struct UpdateTaskArgs {
     pub notes: Option<String>,
     /// Nova data YYYY-MM-DD; string vazia remove a data.
     pub due_date: Option<String>,
+    /// Novo horário HH:MM (24 h); string vazia remove o horário. Exige que a tarefa tenha data.
+    pub due_time: Option<String>,
     /// Substitui as etiquetas da tarefa.
     pub tags: Option<Vec<String>>,
     /// Prioridade: 0 nenhuma, 1 baixa, 2 média, 3 alta.
@@ -187,10 +191,10 @@ impl PrumoServer {
 
 #[tool_router]
 impl PrumoServer {
-    #[tool(description = "Cria uma tarefa. Datas sempre no formato YYYY-MM-DD. As notas aceitam markdown (o app tem um editor markdown), então use as notas para o contexto detalhado: passos, checklist, trechos de código, links. Para incluir imagens, crie a tarefa e depois use attach_image e append_task_notes. A tarefa nova vai para a CAIXA DE ENTRADA (aguarda aprovação do usuário), nunca direto para Hoje.")]
+    #[tool(description = "Cria uma tarefa. Datas sempre no formato YYYY-MM-DD. As notas aceitam markdown (o app tem um editor markdown), então use as notas para o contexto detalhado: passos, checklist, trechos de código, links. Para incluir imagens, crie a tarefa e depois use attach_image e append_task_notes. Se o usuário disser um horário exato, passe due_time (HH:MM) junto com due_date: o app dispara um lembrete. Para vários pedidos numa frase, crie uma tarefa por pedido. A tarefa nova vai para a CAIXA DE ENTRADA (aguarda aprovação do usuário), nunca direto para Hoje.")]
     fn add_task(&self, Parameters(a): Parameters<AddTaskArgs>) -> Result<String, ErrorData> {
         json(self.with(|db| {
-            commands::add(db, SOURCE_MCP, &a.title, a.notes.as_deref(), a.due_date.as_deref(), a.tags.as_deref().unwrap_or(&[]))
+            commands::add(db, SOURCE_MCP, &a.title, a.notes.as_deref(), a.due_date.as_deref(), a.due_time.as_deref(), a.tags.as_deref().unwrap_or(&[]))
         }))
     }
 
@@ -242,10 +246,10 @@ impl PrumoServer {
         json(self.with(|db| commands::search(db, &a.query)))
     }
 
-    #[tool(description = "Atualiza campos de uma tarefa (só os informados). due_date em YYYY-MM-DD (string vazia remove). Atenção: notes SUBSTITUI as notas inteiras, inclusive o que o usuário escreveu; leia antes com get_task e prefira append_task_notes para acrescentar. Não move a tarefa para Hoje: a aprovação da caixa de entrada é do usuário.")]
+    #[tool(description = "Atualiza campos de uma tarefa (só os informados). due_date em YYYY-MM-DD e due_time em HH:MM (string vazia remove). Atenção: notes SUBSTITUI as notas inteiras, inclusive o que o usuário escreveu; leia antes com get_task e prefira append_task_notes para acrescentar. Não move a tarefa para Hoje: a aprovação da caixa de entrada é do usuário.")]
     fn update_task(&self, Parameters(a): Parameters<UpdateTaskArgs>) -> Result<String, ErrorData> {
         json(self.with(|db| {
-            commands::update(db, a.id, a.title.as_deref(), a.notes.as_deref(), a.due_date.as_deref(), a.tags.as_deref(), a.priority)
+            commands::update(db, a.id, a.title.as_deref(), a.notes.as_deref(), a.due_date.as_deref(), a.due_time.as_deref(), a.tags.as_deref(), a.priority)
         }))
     }
 
