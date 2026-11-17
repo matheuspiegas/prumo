@@ -21,6 +21,11 @@ pub struct Settings {
     pub quick_add_shortcut: String,
     /// Notificações nativas para tarefas com hora.
     pub reminders: bool,
+    /// Abrir o Prumo ao entrar no Windows. A fonte da verdade é o registro do sistema
+    /// (plugin autostart); este campo só espelha o estado para a tela de Configurações.
+    pub launch_at_login: bool,
+    /// Ao abrir junto com o sistema, ficar só na bandeja (sem mostrar a janela).
+    pub start_minimized: bool,
 }
 
 /// Alt+Space no Windows abre o menu do sistema (e conflita com o PowerToys Run).
@@ -39,6 +44,8 @@ impl Default for Settings {
             shortcut: "CommandOrControl+Shift+Space".into(),
             quick_add_shortcut: default_quick_add_shortcut().into(),
             reminders: true,
+            launch_at_login: false,
+            start_minimized: true,
         }
     }
 }
