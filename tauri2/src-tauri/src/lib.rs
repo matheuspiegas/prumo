@@ -444,6 +444,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // Entrada "Prumo" em HKCU\...\Run, ligada/desligada em Configurações.
+        .plugin(tauri_plugin_autostart::Builder::new().arg(tray::AUTOSTART_ARG).build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -470,6 +472,13 @@ pub fn run() {
                 plog!("atalhos: {e}");
             }
             tray::setup(app.handle())?;
+            // A janela nasce oculta (tauri.conf.json); ao abrir junto com o sistema fica só na bandeja.
+            let autostart = std::env::args().any(|a| a == tray::AUTOSTART_ARG);
+            if autostart && cfg.start_minimized {
+                tray::hide_main(app.handle());
+            } else {
+                tray::show_main(app.handle());
+            }
             reminders::start(app.handle());
             watch_external_changes(app.handle().clone(), dir.join("prumo.db"));
             Ok(())
@@ -530,6 +539,7 @@ pub fn run() {
             open_logs,
             quickadd::quick_add_task,
             reminders::set_task_time,
+            reminders::test_reminder,
             tags_cmds::list_tags,
             tags_cmds::set_task_tags,
             tags_cmds::list_tasks_by_tag,
