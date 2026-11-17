@@ -38,6 +38,7 @@ chrono = "0.4.45"
 tauri-plugin-global-shortcut = "2.4.1"
 tauri-plugin-single-instance = "2"
 tauri-plugin-notification = "2"
+tauri-plugin-autostart = "2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
@@ -47,3 +48,6 @@ lto = true
 opt-level = 3
 panic = "unwind" # permite que um panic na transcrição vire erro (e não feche o app)
 strip = true
+
+[target."cfg(windows)".dependencies]
+notify-rust = "4.18"
