@@ -1,0 +1,10 @@
+# Versão do Rust fixada para o projeto inteiro (core, cli e app), localmente e no CI.
+#
+# O ort-sys 2.0.0-rc.12 (fixado porque o transcribe-rs 0.3.12 não compila com ort rc.15+) acha a
+# pasta de saída do build contando níveis a partir do OUT_DIR. O Cargo 1.100 mudou esse layout
+# (target/release/build/<crate>/<hash>/out) e o script passa a copiar as DLLs (DirectML.dll)
+# para uma pasta que não existe: "The system cannot find the path specified". Só suba esta versão
+# junto com uma versão do ort/transcribe-rs que entenda o layout novo.
+[toolchain]
+channel = "1.99.1"
+components = ["clippy", "rustfmt"]
