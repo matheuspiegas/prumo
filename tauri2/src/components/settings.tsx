@@ -13,8 +13,11 @@ import {
   acceleratorFromEvent,
   api,
   prettyShortcut,
-  type ClaudeStatus,
-  type ClaudeTest,
+  type Agent,
+  type AgentStatus,
+  type AgentTest,
+  type CodexModel,
+  type McpCommands,
   type Discovery,
   type Settings,
 } from "@/lib/api";
@@ -36,7 +39,12 @@ const THEMES = [
   { value: "light", label: "Claro" },
   { value: "dark", label: "Escuro" },
 ];
+const AGENTS: { value: Agent; label: string; hint: string }[] = [
+  { value: "claude", label: "Claude Code", hint: "Usa a CLI `claude` com a sua assinatura da Anthropic." },
+  { value: "codex", label: "Codex", hint: "Usa a CLI `codex` com a sua conta da OpenAI." },
+];
 const AUTO = "__auto__";
+const CODEX_DEFAULT = "__codex_default__";
 const CUSTOM = "__custom__";
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
@@ -48,6 +56,25 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
       </div>
       {children}
     </motion.section>
+  );
+}
+
+function CommandRow({ label, cmd }: { label: string; cmd: string }) {
+  return (
+    <Field label={label} hint="Rode este comando uma vez no terminal. Se mover o app de pasta, rode de novo.">
+      <div className="flex items-center gap-2">
+        <code className="min-w-0 flex-1 truncate rounded-md border bg-muted px-3 py-2 text-xs">{cmd}</code>
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="Copiar comando"
+          disabled={!cmd}
+          onClick={() => navigator.clipboard.writeText(cmd).then(() => toast.success("Comando copiado"))}
+        >
+          <Copy className="size-4" />
+        </Button>
+      </div>
+    </Field>
   );
 }
 
@@ -66,10 +93,11 @@ export function SettingsView() {
   const [saved, setSaved] = useState<Settings | null>(null);
   const [form, setForm] = useState<Settings | null>(null);
   const [discovery, setDiscovery] = useState<Discovery | null>(null);
-  const [mcpCmd, setMcpCmd] = useState("");
-  const [claude, setClaude] = useState<ClaudeStatus | null>(null);
+  const [mcpCmd, setMcpCmd] = useState<McpCommands | null>(null);
+  const [status, setStatus] = useState<AgentStatus | null>(null);
+  const [codexModels, setCodexModels] = useState<CodexModel[] | null>(null);
   const [testing, setTesting] = useState(false);
-  const [test, setTest] = useState<{ ok: true; r: ClaudeTest } | { ok: false; e: string } | null>(null);
+  const [test, setTest] = useState<{ ok: true; r: AgentTest } | { ok: false; e: string } | null>(null);
   const [capturing, setCapturing] = useState(false);
   const [capturingQuick, setCapturingQuick] = useState(false);
 
@@ -77,7 +105,10 @@ export function SettingsView() {
     api.mcpCommand().then(setMcpCmd).catch(() => {});
   }, []);
 
-  const detect = useCallback((path: string | null) => api.detectClaude(path).then(setClaude).catch(() => {}), []);
+  const detect = useCallback((agent: Agent, path: string | null) => {
+    setStatus(null);
+    api.detectAgent(agent, path).then(setStatus).catch(() => {});
+  }, []);
 
   useEffect(() => {
     api
@@ -85,11 +116,26 @@ export function SettingsView() {
       .then((s) => {
         setSaved(s);
         setForm(s);
-        detect(s.claudePath);
       })
       .catch((e) => toast.error(String(e)));
     api.models().then(setDiscovery).catch(() => {});
-  }, [detect]);
+  }, []);
+
+  // Revalida a CLI ao trocar de agente ou depois de salvar um caminho novo.
+  const agent = form?.agent;
+  const savedPath = saved ? (agent === "codex" ? saved.codexPath : saved.claudePath) : null;
+  useEffect(() => {
+    if (!agent) return;
+    detect(agent, savedPath);
+    setTest(null);
+  }, [agent, savedPath, detect]);
+
+  // Catálogo de modelos do Codex (só quando o Codex está escolhido).
+  const codexPath = saved?.codexPath ?? null;
+  useEffect(() => {
+    if (agent !== "codex") return;
+    api.codexModels(codexPath).then(setCodexModels).catch(() => setCodexModels([]));
+  }, [agent, codexPath]);
 
   if (!form || !saved) return null;
   const dirty = JSON.stringify(form) !== JSON.stringify(saved);
@@ -100,7 +146,6 @@ export function SettingsView() {
       const s = await api.saveSettings(form);
       setSaved(s);
       setForm(s);
-      detect(s.claudePath);
       toast.success("Configurações salvas");
     } catch (e) {
       toast.error(String(e));
@@ -111,7 +156,7 @@ export function SettingsView() {
     setTesting(true);
     setTest(null);
     try {
-      setTest({ ok: true, r: await api.testClaude(form) });
+      setTest({ ok: true, r: await api.testAgent(form) });
     } catch (e) {
       setTest({ ok: false, e: String(e) });
     } finally {
@@ -130,6 +175,19 @@ export function SettingsView() {
     })),
   ];
   const customModel = !MODELS.some((m) => m.value === form.claudeModel);
+  const isCodex = form.agent === "codex";
+  const agentInfo = AGENTS.find((a) => a.value === form.agent) ?? AGENTS[0];
+  const inCatalog = (slug: string) => !!codexModels?.some((m) => m.slug === slug);
+  // "Outro…" guarda um espaço até o usuário digitar (vazio significa "padrão do Codex").
+  const codexCustom = form.codexModel !== "" && !inCatalog(form.codexModel);
+  const codexItems = [
+    { value: CODEX_DEFAULT, label: "Padrão do Codex" },
+    ...(codexModels ?? []).map((m) => ({ value: m.slug, label: m.name })),
+    ...(codexCustom && form.codexModel.trim() ? [{ value: form.codexModel, label: form.codexModel.trim() }] : []),
+    { value: CUSTOM, label: "Outro…" },
+  ];
+  const codexSelectValue = form.codexModel === "" ? CODEX_DEFAULT : codexCustom && !form.codexModel.trim() ? CUSTOM : form.codexModel;
+  const codexDescription = codexModels?.find((m) => m.slug === form.codexModel)?.description;
 
   return (
     <div className="flex h-full flex-col">
@@ -290,63 +348,114 @@ export function SettingsView() {
             title="Agentes (MCP e CLI)"
             hint="Deixe o Claude Code ou o Codex criarem tarefas. Tudo que eles criam cai na caixa de entrada para você aprovar."
           >
-            <Field label="Registrar no Claude Code" hint="Rode este comando uma vez no terminal. Se mover o app de pasta, rode de novo.">
-              <div className="flex items-center gap-2">
-                <code className="min-w-0 flex-1 truncate rounded-md border bg-muted px-3 py-2 text-xs">{mcpCmd}</code>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  disabled={!mcpCmd}
-                  onClick={() => navigator.clipboard.writeText(mcpCmd).then(() => toast.success("Comando copiado"))}
-                >
-                  <Copy className="size-4" />
-                </Button>
-              </div>
-            </Field>
+            <CommandRow label="Registrar no Claude Code" cmd={mcpCmd?.claude ?? ""} />
+            <CommandRow label="Registrar no Codex" cmd={mcpCmd?.codex ?? ""} />
           </Section>
 
-          <Section title="Claude" hint="Interpreta o que você disse (título e data) usando a CLI do Claude Code, com a sua assinatura.">
+          <Section
+            title="Interpretação"
+            hint="Transforma o que você fala ou digita na tarefa rápida em tarefas, com data e horário. Uma frase pode virar várias tarefas."
+          >
+            <div role="radiogroup" aria-label="Agente" className="inline-flex gap-1 self-start rounded-lg border bg-muted/50 p-1">
+              {AGENTS.map((a) => {
+                const active = form.agent === a.value;
+                return (
+                  <motion.button
+                    key={a.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => patch({ agent: a.value })}
+                    className={`relative rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${active ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {active && (
+                      <motion.span layoutId="agente-ativo" transition={softSpring} className="absolute inset-0 rounded-md bg-primary" />
+                    )}
+                    <span className="relative">{a.label}</span>
+                  </motion.button>
+                );
+              })}
+            </div>
+            <p className="-mt-2 text-xs text-muted-foreground">{agentInfo.hint}</p>
             <div className="flex items-start gap-2 text-sm">
-              {claude?.version ? (
+              {status?.version ? (
                 <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-green-600" />
-              ) : (
+              ) : status ? (
                 <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
+              ) : (
+                <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" />
               )}
               <div className="min-w-0">
-                <p>{claude?.version ? `Claude Code ${claude.version}` : (claude?.error ?? "Procurando…")}</p>
-                {claude?.path && <p className="truncate text-xs text-muted-foreground">{claude.path}</p>}
+                <p>{status?.version ? `${agentInfo.label} ${status.version}` : (status?.error ?? "Procurando…")}</p>
+                {status?.path && <p className="truncate text-xs text-muted-foreground">{status.path}</p>}
               </div>
             </div>
             <Field label="Caminho da CLI (opcional)" hint="Deixe vazio para detectar automaticamente.">
-              <Input
-                value={form.claudePath ?? ""}
-                onChange={(e) => patch({ claudePath: e.target.value || null })}
-                placeholder="/Users/você/.local/bin/claude"
-              />
+              {isCodex ? (
+                <Input
+                  value={form.codexPath ?? ""}
+                  onChange={(e) => patch({ codexPath: e.target.value || null })}
+                  placeholder="C:\Users\você\AppData\Roaming\npm\codex.cmd"
+                />
+              ) : (
+                <Input
+                  value={form.claudePath ?? ""}
+                  onChange={(e) => patch({ claudePath: e.target.value || null })}
+                  placeholder="/Users/você/.local/bin/claude"
+                />
+              )}
             </Field>
             <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-4">
-              <Field label="Modelo">
-                <Select
-                  items={[...MODELS, ...(customModel ? [{ value: form.claudeModel, label: form.claudeModel }] : []), { value: CUSTOM, label: "Outro…" }]}
-                  value={form.claudeModel}
-                  onValueChange={(v) => patch({ claudeModel: v === CUSTOM ? "" : (v as string) })}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MODELS.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>
-                        {m.label}
-                      </SelectItem>
-                    ))}
-                    {customModel && form.claudeModel && <SelectItem value={form.claudeModel}>{form.claudeModel}</SelectItem>}
-                    <SelectItem value={CUSTOM}>Outro…</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
+              {isCodex ? (
+                <Field label="Modelo" hint={codexModels === null ? "Lendo os modelos do Codex…" : codexDescription}>
+                  <Select
+                    items={codexItems}
+                    value={codexSelectValue}
+                    onValueChange={(v) =>
+                      patch({ codexModel: v === CODEX_DEFAULT ? "" : v === CUSTOM ? " " : (v as string) })
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {codexItems.map((m) => (
+                        <SelectItem key={m.value} value={m.value}>
+                          {m.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              ) : (
+                <Field label="Modelo">
+                  <Select
+                    items={[...MODELS, ...(customModel ? [{ value: form.claudeModel, label: form.claudeModel }] : []), { value: CUSTOM, label: "Outro…" }]}
+                    value={form.claudeModel}
+                    onValueChange={(v) => patch({ claudeModel: v === CUSTOM ? "" : (v as string) })}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MODELS.map((m) => (
+                        <SelectItem key={m.value} value={m.value}>
+                          {m.label}
+                        </SelectItem>
+                      ))}
+                      {customModel && form.claudeModel && <SelectItem value={form.claudeModel}>{form.claudeModel}</SelectItem>}
+                      <SelectItem value={CUSTOM}>Outro…</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
               <Field label="Esforço">
-                <Select items={EFFORTS} value={form.claudeEffort} onValueChange={(v) => patch({ claudeEffort: v as string })}>
+                <Select
+                  items={EFFORTS}
+                  value={isCodex ? form.codexEffort : form.claudeEffort}
+                  onValueChange={(v) => patch(isCodex ? { codexEffort: v as string } : { claudeEffort: v as string })}
+                >
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -360,30 +469,49 @@ export function SettingsView() {
                 </Select>
               </Field>
             </div>
-            {(customModel || form.claudeModel === "") && (
+            {!isCodex && (customModel || form.claudeModel === "") && (
               <Field label="Nome do modelo" hint="Alias (sonnet) ou id completo, como claude-sonnet-5-5.">
                 <Input value={form.claudeModel} onChange={(e) => patch({ claudeModel: e.target.value })} placeholder="claude-haiku-5-5" />
               </Field>
             )}
-            <div className="flex flex-wrap items-center gap-3">
-              <Button variant="outline" onClick={runTest} disabled={testing}>
-                {testing ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <FlaskConical data-icon="inline-start" />}
-                Testar interpretação
-              </Button>
-              {!test && !testing && (
-                <p className="text-xs text-muted-foreground">Usa a frase “ligar para o João amanhã de manhã”.</p>
-              )}
+            {isCodex && codexCustom && (
+              <Field label="Nome do modelo" hint="Slug do modelo da OpenAI, como aparece em `codex debug models`.">
+                <Input
+                  value={form.codexModel.trim()}
+                  onChange={(e) => patch({ codexModel: e.target.value.trim() || " " })}
+                  placeholder="gpt-6.1-sol"
+                />
+              </Field>
+            )}
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-3">
+                <Button variant="outline" onClick={runTest} disabled={testing}>
+                  {testing ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <FlaskConical data-icon="inline-start" />}
+                  Testar interpretação
+                </Button>
+                {!test && !testing && (
+                  <p className="text-xs text-muted-foreground">
+                    Usa “amanhã dentista às 16 e mercado às 18, depois de amanhã viajar a Porto Alegre”.
+                  </p>
+                )}
+                {test?.ok && <p className="text-xs text-muted-foreground">{(test.r.ms / 1000).toFixed(1)} s</p>}
+              </div>
               <AnimatePresence mode="wait" initial={false}>
                 {test?.ok && (
-                  <motion.p
+                  <motion.ul
                     key="ok"
-                    className="text-sm text-muted-foreground"
+                    className="flex flex-col gap-1 text-sm text-muted-foreground"
                     initial={{ opacity: 0, x: -6 }}
                     animate={{ opacity: 1, x: 0, transition: { duration: DUR_BASE, ease: easeOut } }}
                     exit={{ opacity: 0, transition: { duration: DUR_FAST } }}
                   >
-                    {test.r.title} · {test.r.date ?? "sem data"} · {(test.r.ms / 1000).toFixed(1)} s
-                  </motion.p>
+                    {test.r.tasks.map((t, i) => (
+                      <li key={i}>
+                        <span className="text-foreground">{t.title}</span> · {t.date ?? "sem data"}
+                        {t.time ? ` · ${t.time}` : ""}
+                      </li>
+                    ))}
+                  </motion.ul>
                 )}
                 {test && !test.ok && (
                   <motion.p
@@ -441,7 +569,7 @@ export function SettingsView() {
           <Button variant="ghost" disabled={!dirty} onClick={() => setForm(saved)}>
             Descartar
           </Button>
-          <Button disabled={!dirty || !form.claudeModel.trim()} onClick={save}>
+          <Button disabled={!dirty || (!isCodex && !form.claudeModel.trim()) || (isCodex && codexCustom && !form.codexModel.trim())} onClick={save}>
             Salvar alterações
           </Button>
         </div>
