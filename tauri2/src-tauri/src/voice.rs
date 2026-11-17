@@ -1,5 +1,6 @@
-//! Comandos de voz: gravar → transcrever (local) → interpretar (claude -p) → tarefa.
-use crate::interpret::{self, Parsed};
+//! Comandos de voz: gravar → transcrever (local) → interpretar (Claude Code ou Codex) → tarefas.
+use crate::interpret::{self, Agent, Parsed};
+use crate::quickadd::{Created, create_parsed};
 use crate::settings::{self, Settings};
 use crate::stt::{self, Discovery};
 use crate::{AppDb, audio};
@@ -20,8 +21,11 @@ fn err<E: ToString>(e: E) -> String {
 #[serde(rename_all = "camelCase")]
 pub struct VoiceResult {
     transcript: String,
+    /// Primeira tarefa (atalho para quem mostra uma só).
     title: String,
     date: Option<String>,
+    /// Todas as tarefas criadas a partir da fala.
+    tasks: Vec<Created>,
     /// A interpretação por IA falhou: a tarefa usa o texto bruto.
     fallback: bool,
     warning: Option<String>,
@@ -31,7 +35,7 @@ pub struct VoiceResult {
 
 struct Outcome {
     transcript: String,
-    parsed: Parsed,
+    parsed: Vec<Parsed>,
     warning: Option<String>,
 }
 
@@ -83,7 +87,7 @@ fn process(app: &AppHandle, rec: audio::Recording, s: &Settings) -> Result<Outco
     let _ = app.emit("voice-status", "interpreting");
     match interpret::interpret(s, &transcript) {
         Ok(parsed) => {
-            crate::plog!("voz: interpretação ok (data={:?})", parsed.date);
+            crate::plog!("voz: interpretação ok ({} tarefa(s))", parsed.len());
             Ok(Outcome { transcript, parsed, warning: None })
         }
         Err(e) => {
@@ -91,7 +95,8 @@ fn process(app: &AppHandle, rec: audio::Recording, s: &Settings) -> Result<Outco
             // Nunca perder a gravação: usa o texto bruto como título.
             let title: String = transcript.chars().take(80).collect();
             let notes = if transcript.chars().count() > 80 { transcript.clone() } else { String::new() };
-            Ok(Outcome { transcript, parsed: Parsed { title, date: None, notes }, warning: Some(e) })
+            let parsed = vec![Parsed { title, date: None, time: None, notes }];
+            Ok(Outcome { transcript, parsed, warning: Some(e) })
         }
     }
 }
@@ -111,25 +116,22 @@ pub async fn voice_stop(
             crate::plog!("voz: a tarefa de transcrição terminou de forma inesperada: {e}");
             format!("A transcrição falhou de forma inesperada ({e}). Veja o log em Configurações > Diagnóstico.")
         })??;
-    crate::plog!("voz: tarefa criada");
-
     let s = settings::load();
-    let db = db.0.lock().map_err(err)?;
-    let id = db
-        .add_task_from(&out.parsed.title, &out.parsed.notes, out.parsed.date.as_deref(), "voz")
-        .map_err(err)?;
-    if s.auto_approve {
-        db.approve_task(id).map_err(err)?;
-    }
-    drop(db);
+    let tasks = {
+        let db = db.0.lock().map_err(err)?;
+        create_parsed(&db, &out.parsed, "voz", s.auto_approve, None, None)?
+    };
+    crate::plog!("voz: {} tarefa(s) criada(s)", tasks.len());
     let _ = app.emit("tasks-changed", ());
+    let first = tasks.first().cloned().ok_or("Nenhuma tarefa criada")?;
     Ok(VoiceResult {
         transcript: out.transcript,
-        title: out.parsed.title,
-        date: out.parsed.date,
+        title: first.title,
+        date: first.date,
+        tasks,
         fallback: out.warning.is_some(),
         warning: out.warning,
-        task_id: id,
+        task_id: first.id,
         inbox: !s.auto_approve,
     })
 }
@@ -193,43 +195,57 @@ pub async fn discover_models() -> Result<Discovery, String> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ClaudeStatus {
+pub struct AgentStatus {
     path: Option<String>,
     version: Option<String>,
     error: Option<String>,
 }
 
+/// Procura a CLI do agente (`claude` ou `codex`) e lê a versão.
 #[tauri::command]
-pub async fn detect_claude(path: Option<String>) -> Result<ClaudeStatus, String> {
+pub async fn detect_agent(agent: String, path: Option<String>) -> Result<AgentStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let Some(p) = interpret::find_claude(path.as_deref()) else {
-            return ClaudeStatus { path: None, version: None, error: Some("CLI `claude` não encontrada".into()) };
+        let agent = Agent::from_setting(&agent);
+        let Some(p) = interpret::find_cli(agent, path.as_deref()) else {
+            return AgentStatus { path: None, version: None, error: Some(format!("CLI do {} não encontrada", agent.name())) };
         };
-        match interpret::claude_version(&p) {
-            Ok(v) => ClaudeStatus { path: Some(p.to_string_lossy().into()), version: Some(v), error: None },
-            Err(e) => ClaudeStatus { path: Some(p.to_string_lossy().into()), version: None, error: Some(e) },
+        match interpret::cli_version(&p) {
+            Ok(v) => AgentStatus { path: Some(p.to_string_lossy().into()), version: Some(v), error: None },
+            Err(e) => AgentStatus { path: Some(p.to_string_lossy().into()), version: None, error: Some(e) },
         }
     })
     .await
     .map_err(err)
 }
 
+/// Catálogo de modelos do Codex instalado (para a lista em Configurações).
+#[tauri::command]
+pub async fn codex_models(path: Option<String>) -> Result<Vec<interpret::CodexModel>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cli = interpret::find_cli(Agent::Codex, path.as_deref()).ok_or("CLI do Codex não encontrada")?;
+        interpret::codex_models(&cli)
+    })
+    .await
+    .map_err(err)?
+}
+
 #[derive(Serialize)]
 pub struct TestResult {
-    title: String,
-    date: Option<String>,
-    notes: String,
+    tasks: Vec<Parsed>,
     ms: u128,
 }
 
+/// Frase do botão "Testar interpretação".
+pub const TEST_PHRASE: &str = "amanhã preciso ir ao dentista às 16 e ir ao mercado às 18, depois de amanhã viajar a Porto Alegre";
+
 /// Faz uma interpretação de teste com as configurações informadas (ainda não salvas).
 #[tauri::command]
-pub async fn test_claude(settings: Settings) -> Result<TestResult, String> {
+pub async fn test_agent(settings: Settings) -> Result<TestResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let s = settings.sanitized();
         let t = Instant::now();
-        let p = interpret::interpret(&s, "ligar para o João amanhã de manhã")?;
-        Ok(TestResult { title: p.title, date: p.date, notes: p.notes, ms: t.elapsed().as_millis() })
+        let tasks = interpret::interpret(&s, TEST_PHRASE)?;
+        Ok(TestResult { tasks, ms: t.elapsed().as_millis() })
     })
     .await
     .map_err(err)?
