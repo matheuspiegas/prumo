@@ -6,6 +6,9 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
+/// Argumento passado pela entrada de início automático (para abrir só na bandeja).
+pub const AUTOSTART_ARG: &str = "--autostart";
+
 /// Mostra e foca a janela principal (no macOS volta a política para Regular).
 pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(target_os = "macos")]
