@@ -92,6 +92,8 @@ export type VoiceResult = {
 };
 
 export type TrashItem = { task: Task; daysAgo: number; daysLeft: number };
+/** Tarefa concluída e o instante local da conclusão ("YYYY-MM-DD HH:MM"). */
+export type CompletedItem = { task: Task; completedAt: string };
 
 /** Quadro branco (ver docs/plano-quadros.md). A cena em si (JSON do Excalidraw) fica em arquivo, não aqui. */
 export type Board = { id: number; name: string; createdAt: string; updatedAt: string; hasThumbnail: boolean };
@@ -140,6 +142,9 @@ export const api = {
   search: (query: string) => invoke<Task[]>("search_tasks", { query }),
   reorder: (ids: number[]) => invoke<void>("reorder_tasks", { ids }),
   overdue: () => invoke<Task[]>("list_overdue"),
+  /** Concluídas no período (datas locais inclusivas; null = sem limite), da mais recente para a mais antiga. */
+  listCompleted: (from: string | null, to: string | null) => invoke<CompletedItem[]>("list_completed", { from, to }),
+  countCompleted: (from: string | null, to: string | null) => invoke<number>("count_completed", { from, to }),
   /** Sem `id`, reagenda todas as atrasadas para hoje. */
   rescheduleToToday: (id?: number) => invoke<void>("reschedule_to_today", { id: id ?? null }),
   setPriority: (id: number, priority: number) => invoke<void>("set_priority", { id, priority }),
