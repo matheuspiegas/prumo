@@ -7,6 +7,7 @@ use serde::Serialize;
 use std::{sync::Mutex, time::Instant};
 use tauri::{AppHandle, Emitter, State};
 use std::sync::atomic::{AtomicU32, Ordering};
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
 pub struct VoiceState(pub Mutex<Option<audio::Recording>>);
@@ -134,8 +135,13 @@ pub async fn voice_stop(
 }
 
 #[tauri::command]
-pub fn get_settings() -> Settings {
-    settings::load()
+pub fn get_settings(app: AppHandle) -> Settings {
+    let mut s = settings::load();
+    // O usuário pode ter desligado pelo Gerenciador de Tarefas: vale o que está no sistema.
+    if let Ok(on) = app.autolaunch().is_enabled() {
+        s.launch_at_login = on;
+    }
+    s
 }
 
 /// Id do atalho do quick-add, para o handler distinguir qual atalho foi pressionado.
@@ -171,6 +177,11 @@ pub fn register_shortcut(app: &AppHandle, voice: &str, quick_add: &str) -> Resul
 #[tauri::command]
 pub fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String> {
     let saved = settings::save(&settings).map_err(err)?;
+    let al = app.autolaunch();
+    if al.is_enabled().ok() != Some(saved.launch_at_login) {
+        let r = if saved.launch_at_login { al.enable() } else { al.disable() };
+        r.map_err(|e| format!("Não consegui alterar o início com o sistema: {e}"))?;
+    }
     register_shortcut(&app, &saved.shortcut, &saved.quick_add_shortcut)?;
     Ok(saved)
 }
