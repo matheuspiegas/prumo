@@ -363,7 +363,7 @@ export function DoneView({
                       <AnimatedCount value={g.items.length} />
                     </span>
                   </header>
-                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-2 pt-1 pb-2 [scrollbar-color:color-mix(in_oklab,var(--foreground)_22%,transparent)_transparent] [scrollbar-gutter:stable] [scrollbar-width:thin]">
+                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-2 pt-1 pb-2 [scrollbar-gutter:stable]">
                     {renderItems(g, "card")}
                   </div>
                 </section>
