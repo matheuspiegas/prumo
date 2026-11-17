@@ -505,6 +505,7 @@ pub fn run() {
                 plog!("atalhos: {e}");
             }
             tray::setup(app.handle())?;
+            voice::refresh_autostart(app.handle());
             // A janela nasce oculta (tauri.conf.json); ao abrir junto com o sistema fica só na bandeja.
             let autostart = std::env::args().any(|a| a == tray::AUTOSTART_ARG);
             if autostart && cfg.start_minimized {

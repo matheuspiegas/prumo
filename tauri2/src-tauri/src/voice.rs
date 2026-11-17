@@ -146,6 +146,21 @@ pub fn get_settings(app: AppHandle) -> Settings {
     s
 }
 
+/// Regrava a entrada de autostart com o caminho do executável atual, se ela estiver ligada.
+/// Corrige entradas apontando para outro lugar (build de debug antigo, app movido/reinstalado).
+/// Não liga nada que o usuário tenha desligado, e não roda em build de debug.
+pub fn refresh_autostart(app: &AppHandle) {
+    if cfg!(debug_assertions) {
+        return;
+    }
+    let al = app.autolaunch();
+    if al.is_enabled().unwrap_or(false) {
+        if let Err(e) = al.enable() {
+            crate::plog!("autostart: não consegui atualizar a entrada: {e}");
+        }
+    }
+}
+
 /// Id do atalho do quick-add, para o handler distinguir qual atalho foi pressionado.
 static QUICK_ADD_ID: AtomicU32 = AtomicU32::new(0);
 
@@ -179,10 +194,14 @@ pub fn register_shortcut(app: &AppHandle, voice: &str, quick_add: &str) -> Resul
 #[tauri::command]
 pub fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String> {
     let saved = settings::save(&settings).map_err(err)?;
-    let al = app.autolaunch();
-    if al.is_enabled().ok() != Some(saved.launch_at_login) {
-        let r = if saved.launch_at_login { al.enable() } else { al.disable() };
-        r.map_err(|e| format!("Não consegui alterar o início com o sistema: {e}"))?;
+    // Build de debug (tauri dev) não mexe no autostart: gravaria no Registro o caminho de
+    // `target\debug\prumo.exe`, que no boot abre console e não acha o servidor do front.
+    if !cfg!(debug_assertions) {
+        let al = app.autolaunch();
+        if al.is_enabled().ok() != Some(saved.launch_at_login) {
+            let r = if saved.launch_at_login { al.enable() } else { al.disable() };
+            r.map_err(|e| format!("Não consegui alterar o início com o sistema: {e}"))?;
+        }
     }
     register_shortcut(&app, &saved.shortcut, &saved.quick_add_shortcut)?;
     Ok(saved)
