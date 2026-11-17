@@ -43,8 +43,11 @@ tauri-plugin-autostart = "2"
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
-codegen-units = 1
-lto = true
+# LTO "thin" com codegen-units padrão (16): o build release cai de ~3 min para ~1 min (medido
+# recompilando só o app), com o .exe ~2 MB maior. O LTO "fat" com codegen-units = 1 otimiza o
+# programa inteiro numa thread só e era a etapa mais lenta do CI; o trabalho pesado (ONNX e ggml)
+# roda em bibliotecas C++, que essa opção não afeta.
+lto = "thin"
 opt-level = 3
 panic = "unwind" # permite que um panic na transcrição vire erro (e não feche o app)
 strip = true
