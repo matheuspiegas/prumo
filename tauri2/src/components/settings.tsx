@@ -246,7 +246,43 @@ export function SettingsView() {
                   Avisa no horário das tarefas que têm hora definida.
                 </p>
               </div>
-              <Switch id="reminders" checked={form.reminders} onCheckedChange={(c) => patch({ reminders: c })} />
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    api
+                      .testReminder()
+                      .then(() => toast.success("Notificação enviada"))
+                      .catch((e) => toast.error(`Falhou: ${e}`))
+                  }
+                >
+                  Testar
+                </Button>
+                <Switch id="reminders" checked={form.reminders} onCheckedChange={(c) => patch({ reminders: c })} />
+              </div>
+            </div>
+          </Section>
+
+          <Section title="Inicialização" hint="Os lembretes só disparam com o Prumo aberto (fechar a janela o mantém na bandeja).">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-0.5">
+                <Label htmlFor="launch">Abrir com o sistema</Label>
+                <p className="text-xs text-muted-foreground">Inicia o Prumo quando você entra no computador.</p>
+              </div>
+              <Switch id="launch" checked={form.launchAtLogin} onCheckedChange={(c) => patch({ launchAtLogin: c })} />
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-0.5">
+                <Label htmlFor="minimized">Iniciar minimizado</Label>
+                <p className="text-xs text-muted-foreground">Ao abrir com o sistema, fica só na bandeja, sem mostrar a janela.</p>
+              </div>
+              <Switch
+                id="minimized"
+                disabled={!form.launchAtLogin}
+                checked={form.startMinimized}
+                onCheckedChange={(c) => patch({ startMinimized: c })}
+              />
             </div>
           </Section>
 
