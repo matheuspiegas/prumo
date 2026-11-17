@@ -96,9 +96,15 @@ fn err<E: ToString>(e: E) -> String {
     e.to_string()
 }
 
-/// Comando para registrar o servidor MCP do Prumo no Claude Code.
+#[derive(Serialize)]
+struct McpCommands {
+    claude: String,
+    codex: String,
+}
+
+/// Comandos para registrar o servidor MCP do Prumo no Claude Code e no Codex.
 #[tauri::command]
-fn mcp_command() -> String {
+fn mcp_command() -> McpCommands {
     let exe = if cfg!(windows) { "prumo-cli.exe" } else { "prumo-cli" };
     let mut cands: Vec<PathBuf> = vec![];
     // Produção (e `tauri dev`): o sidecar fica ao lado do executável do app.
@@ -115,7 +121,10 @@ fn mcp_command() -> String {
         .and_then(|p| p.canonicalize().ok())
         .map(|p| p.display().to_string().trim_start_matches(r"\\?\").replace('\\', "/"))
         .unwrap_or_else(|| "prumo-cli".to_string());
-    format!("claude mcp add prumo -- \"{path}\" mcp")
+    McpCommands {
+        claude: format!("claude mcp add prumo -- \"{path}\" mcp"),
+        codex: format!("codex mcp add prumo -- \"{path}\" mcp"),
+    }
 }
 
 fn lock<'a>(db: &'a State<AppDb>) -> Result<std::sync::MutexGuard<'a, Db>, String> {
@@ -538,6 +547,7 @@ pub fn run() {
             dates,
             open_logs,
             quickadd::quick_add_task,
+            quickadd::quick_add_smart,
             reminders::set_task_time,
             reminders::test_reminder,
             tags_cmds::list_tags,
@@ -565,8 +575,9 @@ pub fn run() {
             mcp_command,
             voice::save_settings,
             voice::discover_models,
-            voice::detect_claude,
-            voice::test_claude
+            voice::detect_agent,
+            voice::codex_models,
+            voice::test_agent
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
