@@ -22,6 +22,9 @@ enum Cmd {
         /// YYYY-MM-DD, hoje ou amanhã
         #[arg(long)]
         due: Option<String>,
+        /// Horário HH:MM (exige --due); dispara um lembrete no app
+        #[arg(long)]
+        time: Option<String>,
         #[arg(long)]
         notes: Option<String>,
         #[arg(long = "tag")]
@@ -72,8 +75,8 @@ fn run(cli: Cli) -> Result<(), String> {
     let db = open_db()?;
     let j = cli.json;
     match cli.cmd {
-        Cmd::Add { title, due, notes, tags } => {
-            let t = commands::add(&db, commands::SOURCE_CLI, &title, notes.as_deref(), due.as_deref(), &tags)?;
+        Cmd::Add { title, due, time, notes, tags } => {
+            let t = commands::add(&db, commands::SOURCE_CLI, &title, notes.as_deref(), due.as_deref(), time.as_deref(), &tags)?;
             out(j, &t, || format!("Criada na caixa de entrada: {}", commands::render_task(&t)));
         }
         Cmd::List { tomorrow, all, done, inbox, overdue, .. } => {
