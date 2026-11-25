@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PriorityDot } from "@/components/priority-select";
 import { SubtaskProgress } from "@/components/subtasks-list";
+import { TaskId } from "@/components/task-id";
 import { Highlight } from "@/components/highlight";
 import { dueLabel, type Task } from "@/lib/api";
 import { bouncy, rowVariants } from "@/lib/motion";
@@ -121,6 +122,7 @@ export function TaskRow({
           />
         </motion.span>
       </span>
+      <TaskId id={task.id} />
       <AnimatePresence initial={false}>
         {task.priority > 0 && (
           <motion.span key="prio" className="flex" {...pop}>

@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { RotateCcw, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
+import { TaskId } from "@/components/task-id";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -84,7 +85,10 @@ export function TrashView({ onChanged }: { onChanged?: () => void }) {
                   className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-accent"
                 >
                   <span className="min-w-0 flex-1 text-sm">
-                    <span className="block truncate">{task.title}</span>
+                    <span className="flex items-baseline gap-2">
+                      <span className="truncate">{task.title}</span>
+                      <TaskId id={task.id} />
+                    </span>
                     <span className="text-xs text-muted-foreground">
                       Excluída {ago(daysAgo)} · {left(daysLeft)}
                     </span>
