@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { SubtasksList } from "@/components/subtasks-list";
 import { TaskAttachments } from "@/components/task-attachments";
+import { TaskId } from "@/components/task-id";
 import { TaskProperties } from "@/components/task-properties";
 import type { NotesEditorHandle } from "@/components/notes-editor/notes-editor";
 import type { NoteImage } from "@/components/notes-editor/image-context";
@@ -139,7 +140,10 @@ export function TaskDialog({ open, task, defaultDate, defaultTags, onClose, onSa
         )}
       >
         <DialogHeader>
-          <DialogTitle>{task ? "Editar tarefa" : "Nova tarefa"}</DialogTitle>
+          <DialogTitle className="flex items-baseline gap-2">
+            {task ? "Editar tarefa" : "Nova tarefa"}
+            {task && <TaskId id={task.id} copyable className="text-sm font-normal" />}
+          </DialogTitle>
         </DialogHeader>
         <motion.form
           variants={formVariants}

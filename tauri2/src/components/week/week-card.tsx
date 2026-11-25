@@ -7,6 +7,7 @@ import { recurrenceLabel } from "@/components/recurrence-select";
 import { PriorityDot } from "@/components/priority-select";
 import { SubtaskProgress } from "@/components/subtasks-list";
 import { TagChip } from "@/components/tag-chip";
+import { TaskId } from "@/components/task-id";
 import { Checkbox } from "@/components/ui/checkbox";
 import { dueLabel, type Task } from "@/lib/api";
 import { DUR_BASE, easeOut } from "@/lib/motion";
@@ -51,6 +52,7 @@ export const CardBody = forwardRef<
         <span className={cn("min-w-0 flex-1 break-words leading-snug", done && "text-muted-foreground line-through")}>
           {task.title}
         </span>
+        <TaskId id={task.id} className="pt-px" />
       </div>
       {hasMeta && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-6 text-xs text-muted-foreground">

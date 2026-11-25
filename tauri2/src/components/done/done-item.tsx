@@ -3,6 +3,7 @@ import { CalendarCheck, Clock, Repeat } from "lucide-react";
 import { recurrenceLabel } from "@/components/recurrence-select";
 import { PriorityDot } from "@/components/priority-select";
 import { TagChip } from "@/components/tag-chip";
+import { TaskId } from "@/components/task-id";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { dueLabel, type CompletedItem } from "@/lib/api";
@@ -97,6 +98,7 @@ export function DoneItem({ item, today, tomorrow, variant, onOpen, onReopen }: P
         <div className="flex items-start gap-2">
           <span className="pt-0.5">{check}</span>
           <span className="min-w-0 flex-1 break-words leading-snug">{t.title}</span>
+          <TaskId id={t.id} className="pt-px" />
           <span className="pt-px text-xs text-muted-foreground tabular-nums" title="Concluída às">
             {time}
           </span>
@@ -120,6 +122,7 @@ export function DoneItem({ item, today, tomorrow, variant, onOpen, onReopen }: P
       </span>
       {check}
       <span className="min-w-0 flex-1 truncate text-sm">{t.title}</span>
+      <TaskId id={t.id} />
       <span className="flex shrink-0 items-center gap-2 empty:hidden">{meta}</span>
     </motion.li>
   );
